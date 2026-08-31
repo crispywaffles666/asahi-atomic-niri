@@ -10,27 +10,6 @@ provides the shell (bar, launcher, notifications, lock, OSD, idle). GNOME
 libraries are used selectively (portals, keyring, Nautilus), as in
 `bazzite-niri`.
 
-## Installation
-
-> Install on a Mac the standard way first: use the official Asahi Linux
-> installer to create the Fedora Asahi Remix system, then rebase onto this
-> image. Do **not** repartition or touch the boot chain yourself — the Asahi
-> installer handles m1n1, U-Boot, and partitioning. It installs into free space
-> and leaves macOS Recovery intact.
-
-From a stock Fedora Asahi Remix system, rebase:
-
-```bash
-sudo rpm-ostree rebase ostree-unverified-image:registry:ghcr.io/crispywaffles666/asahi-atomic-niri:latest
-sudo reboot
-```
-
-Everything intended for signing/verification is described in
-[Image signing](#image-signing). Because this image extends the official Asahi
-`base-atomic`, it inherits the Asahi kernel, boot chain, and hardware support
-unchanged. Rollback is standard bootc: pick a previous deployment from the boot
-menu.
-
 ## What's included
 
 Built on `quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44`, which
