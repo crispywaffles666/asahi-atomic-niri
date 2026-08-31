@@ -45,6 +45,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute date tag
+        id: date
+        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
@@ -55,6 +59,7 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:44-${{ steps.date.outputs.date }}
           provenance: false
 
       - name: Sign the container image
@@ -67,3 +72,5 @@ jobs:
             "${{ env.IMAGE_NAME }}:${{ github.sha }}"
           cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
             "${{ env.IMAGE_NAME }}:latest"
+          cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
+            "${{ env.IMAGE_NAME }}:44-${{ steps.date.outputs.date }}"

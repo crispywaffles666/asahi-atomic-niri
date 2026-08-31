@@ -30,18 +30,54 @@ RUN dnf install -y \
     gcc make patch \
     tailscale \
     uupd \
+    # Containerized dev environments. distrobox is a wrapper around podman,
+    # which the base-atomic image already ships (minimal-plus manifest).
+    distrobox \
+    # Flatpak runtime + a system Flathub remote (added at first boot by
+    # flathub-setup.service). Explicit so the per-user flatpak bootstrap and
+    # uupd's flatpak module have a guaranteed base to work on.
+    flatpak \
+    # "Boring desktop plumbing" the minimal base-atomic image does not ship:
+    # mobile/removable-storage + archive mounting via gvfs, disk management,
+    # printing, Bluetooth, CPU power profiles, archives, PDF and image viewers.
+    udisks2 \
+    gvfs gvfs-mtp gvfs-archive gvfs-fuse \
+    gnome-disk-utility \
+    cups cups-client \
+    bluez blueman \
+    power-profiles-daemon \
+    file-roller file-roller-nautilus evince eog \
+    # Host-native multimedia codecs (software decode) for the common codecs:
+    # H.264/HEVC/VP9/AV1/AAC etc. All plain Fedora "-free" plugins; we do NOT
+    # override Asahi's Mesa, kernel, or firmware (Asahi's AVD/VA-API hardware
+    # decode is not yet bundled upstream, so software decode is the safe win).
+    ffmpeg-free \
+    gstreamer1-plugins-base gstreamer1-plugins-base-tools \
+    gstreamer1-plugins-good \
+    gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free \
     --exclude="swaylock,waybar,fuzzel" \
     && dnf clean all
 
 # Copy system configuration files
 COPY files/system/ /
 
-# Enable greetd display manager and graphical target
+# The per-user flatpak bootstrap script ships in /usr/libexec and must be
+# executable (git does not preserve the exec bit through COPY).
+RUN chmod +x /usr/libexec/asahi-niri/config-flatpaks.sh
+
+# Enable greetd display manager, networking/switch service, automatic updates,
+# the per-user flatpak bootstrap, and the desktop plumbing services, then set the
+# graphical target. CUPS and Bluetooth use socket activation (cups.socket) so they
+# only start when first needed. power-profiles-daemon provides CPU performance
+# profile control on Apple Silicon and is socket-activated by its own service.
 RUN systemctl enable greetd.service && \
     systemctl enable tailscaled.service && \
     systemctl enable uupd.timer && \
     systemctl enable flathub-setup.service && \
     systemctl enable brew-setup.service && \
+    systemctl enable cups.socket && \
+    systemctl enable bluetooth.service && \
+    systemctl enable power-profiles-daemon.service && \
     systemctl set-default graphical.target
 
 # Homebrew: stage an image-owned brew tree that brew-setup.service copies into
@@ -86,7 +122,7 @@ RUN chmod +x /tmp/validate-image.sh && \
 # gnome-keyring/portal post-install (recreated where needed at boot by
 # tmpfiles.d). This is standard bootc image hygiene, not validation weakening.
 RUN rm -rf \
-    /var/log/dnf5.log \
+    /var/log/dnf5.log* \
     /var/cache/libdnf5 \
     /var/cache/ldconfig/aux-cache \
     /var/lib/dnf \
