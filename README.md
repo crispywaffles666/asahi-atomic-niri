@@ -1,14 +1,10 @@
 # asahi-atomic-niri
 
 A Fedora Asahi Remix Atomic (bootc) image with the **niri** compositor and
-**Noctalia** shell for Apple Silicon Macs (M-series) — the same tiling Wayland
-desktop as [crispywaffles666/bazzite-niri](https://github.com/crispywaffles666/bazzite-niri),
-built as a clean bootable container on top of Fedora Asahi Remix.
+**Noctalia** shell for Apple Silicon Macs (M-series). The same tiling Wayland
+desktop as [my bazzite image](https://github.com/crispywaffles666/bazzite-niri),
+built as a bootable container on top of Fedora Asahi Remix.
 
-There is **no GNOME or KDE session** — niri is the compositor and Noctalia
-provides the shell (bar, launcher, notifications, lock, OSD, idle). GNOME
-libraries are used selectively (portals, keyring, Nautilus), as in
-`bazzite-niri`.
 
 ## What's included
 
@@ -37,17 +33,6 @@ satty, yazi, and the helper scripts `niri-overview-autoclose.sh`,
 installed at build time.
 
 Flatpaks installed per-user at first login: `it.mijorus.smile` (emoji picker).
-
-Not included, by design: the gaming stack (Steam, Proton, Lutris, Gamescope,
-Wine), NVIDIA/AMD drivers and akmods, and other Bazzite/x86-specific contents.
-
-### GTK theme
-
-As in `bazzite-niri`, the image ships a gschema override that selects the
-`Graphite-purple-Dark-dracula` GTK theme, `Colloid-Dracula-Dark` icon theme, and
-the Overpass Nerd Font. The theme and icon packages are installed by the user
-(exactly as on a `bazzite-niri` machine) — drop them into `~/.themes` and
-`~/.icons` (or `/usr/share/themes` and `/usr/share/icons`) to complete the look.
 
 ## Image signing
 
