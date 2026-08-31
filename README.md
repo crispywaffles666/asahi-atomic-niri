@@ -29,8 +29,7 @@ starship, fastfetch, libnotify, xdg-utils, overpass-fonts, pulseaudio-utils
 User dotfiles and configs (`/etc/skel`): niri (`config.kdl` + `cfg/`), Noctalia,
 bash/zsh/starship, alacritty, ghostty, micro, geany, btop, cava, fastfetch,
 satty, yazi, and the helper scripts `niri-overview-autoclose.sh`,
-`screenshot-notify.sh`, and `smile-paste.sh`. The Overpass Nerd Font is
-installed at build time.
+`screenshot-notify.sh`, and `smile-paste.sh`.
 
 Flatpaks installed per-user at first login: `it.mijorus.smile` (emoji picker).
 
