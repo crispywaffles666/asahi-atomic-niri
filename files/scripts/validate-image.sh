@@ -87,7 +87,7 @@ REQUIRED_BINARIES=(
     alacritty
     ghostty
     satty
-    brave-browser-stable
+    brave-origin
     nautilus
     xwayland-satellite
     playerctl

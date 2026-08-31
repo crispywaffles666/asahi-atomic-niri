@@ -23,7 +23,7 @@ RUN dnf install -y \
     libnotify xdg-utils \
     fastfetch \
     pulseaudio-utils \
-    brave-browser \
+    brave-origin \
     --exclude="swaylock,waybar,fuzzel" \
     && dnf clean all
 

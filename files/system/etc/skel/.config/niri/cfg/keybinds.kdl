@@ -6,7 +6,7 @@ binds {
     Mod+Backslash { spawn "ghostty"; }
     Alt+Space { show-hotkey-overlay; }
     Super+Space { focus-column-left; }
-    Mod+B { spawn "brave-browser"; }
+    Mod+B { spawn "brave-origin"; }
     Mod+E { spawn "nautilus"; }
     Mod+Period { spawn "sh" "-c" "$HOME/.local/bin/smile-paste.sh"; }
 

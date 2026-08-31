@@ -20,7 +20,7 @@ U-Boot).
 **Terminals:** alacritty, ghostty
 
 **Desktop apps:** nautilus, gnome-keyring, seahorse, xdg-desktop-portal-gnome,
-xdg-desktop-portal-gtk, geany, brave-browser
+xdg-desktop-portal-gtk, geany, brave-origin
 
 **Tools:** brightnessctl, playerctl, inotify-tools, wl-clipboard, wtype,
 pavucontrol, cava, satty, xterm, zsh, bat, micro, ripgrep, stow, yazi,
