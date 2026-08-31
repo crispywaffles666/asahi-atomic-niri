@@ -1,7 +1,7 @@
 # asahi-atomic-niri
 
 A Fedora Asahi Remix Atomic (bootc) image with the **niri** compositor and
-**Noctalia** shell for Apple Silicon Macs (M-series). The same tiling Wayland
+**Noctalia** shell for Apple Silicon Macs. The same tiling Wayland
 desktop as [my bazzite image](https://github.com/crispywaffles666/bazzite-niri),
 built as a bootable container on top of Fedora Asahi Remix.
 
