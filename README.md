@@ -24,7 +24,8 @@ xdg-desktop-portal-gtk, geany, brave-origin
 
 **Tools:** brightnessctl, playerctl, inotify-tools, wl-clipboard, wtype,
 pavucontrol, cava, satty, xterm, zsh, bat, micro, ripgrep, stow, yazi,
-starship, fastfetch, libnotify, xdg-utils, overpass-fonts, pulseaudio-utils
+starship, fastfetch, libnotify, xdg-utils, overpass-fonts, pulseaudio-utils,
+tailscale, uupd
 
 User dotfiles and configs (`/etc/skel`): niri (`config.kdl` + `cfg/`), Noctalia,
 bash/zsh/starship, alacritty, ghostty, micro, geany, btop, cava, fastfetch,
@@ -32,6 +33,23 @@ satty, yazi, and the helper scripts `niri-overview-autoclose.sh`,
 `screenshot-notify.sh`, and `smile-paste.sh`.
 
 Flatpaks installed per-user at first login: `it.mijorus.smile` (emoji picker).
+
+## Homebrew, Tailscale, and automatic updates
+
+Three convenience features are layered on top of the base:
+
+- **Homebrew** — staged image-owned at build time and copied into
+  `/var/home/linuxbrew` on first boot by `brew-setup.service`. Managed as the
+  default user (UID 1000); brew analytics are disabled.
+- **Tailscale** — installed from Tailscale's official RPM repository with
+  `tailscaled.service` enabled. Run `sudo tailscale up` to join your tailnet.
+- **Automatic updates** — `uupd` (from the Universal Blue `ublue-os/packages`
+  COPR) runs daily via `uupd.timer` and updates the OS via bootc, flatpaks (a
+  system Flathub remote is added on first boot by `flathub-setup.service`), and
+  brew packages. Config lives at `/etc/uupd/config.json`.
+
+Homebrew, tailscale, and the flathub system remote assume the machine's primary
+user is UID 1000 (the Fedora/Asahi default).
 
 ## Image signing
 
@@ -72,16 +90,24 @@ packages present, referenced binaries available) and on
 ├── .github/workflows/build.yml   # CI: build aarch64, push, sign
 ├── Containerfile                 # base + packages + config + validation
 ├── files/
+│   ├── dnf/                          # repo files copied into the image
+│   │   ├── tailscale.repo
+│   │   └── ublue-packages.repo       # uupd COPR
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
+│   │   ├── install-brew.sh           # stage homebrew at build time
 │   │   └── validate-image.sh         # build-time assertions
 │   └── system/                      # copied into the image
 │       ├── etc/
 │       │   ├── greetd/config.toml
+│       │   ├── profile.d/brew.sh
 │       │   ├── skel/                # /etc/skel dotfiles
-│       │   └── systemd/logind.conf.d/
+│       │   ├── systemd/logind.conf.d/
+│       │   └── uupd/config.json
 │       └── usr/
-│           ├── lib/tmpfiles.d/tuigreet.conf
+│           ├── lib/
+│           │   ├── systemd/system/brew-setup.service, flathub-setup.service
+│           │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf
 │           └── share/glib-2.0/schemas/zz_asahi-atomic-niri.gschema.override
 └── cosign.pub
 ```

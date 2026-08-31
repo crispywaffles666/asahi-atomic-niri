@@ -14,6 +14,8 @@ REQUIRED_PACKAGES=(
     xdg-desktop-portal-gnome
     xdg-desktop-portal-gtk
     nautilus
+    tailscale
+    uupd
 )
 
 # GNOME/KDE desktop packages that must NOT be present (Noctalia + niri replace them)
@@ -110,10 +112,18 @@ REQUIRED_BINARIES=(
     xdg-open
     fastfetch
     pactl
+    tailscaled
+    uupd
 )
 
 for binary in "${REQUIRED_BINARIES[@]}"; do
     command -v "$binary" >/dev/null 2>&1 || fail "required command not found: $binary"
 done
+
+# Homebrew is staged as image-owned content under /usr/share/homebrew and copied
+# into /var/home/linuxbrew at first boot by brew-setup.service.
+if [[ ! -x /usr/share/homebrew/home/linuxbrew/.linuxbrew/bin/brew ]]; then
+    fail "staged homebrew binary not found in image"
+fi
 
 echo "Image validation passed."

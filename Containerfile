@@ -8,7 +8,10 @@ FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 # wants, and keeps Bootc's var-tmpfiles lint clean (no browser files in /var).
 RUN rm -rf /opt
 
-# Add third-party repositories
+# Add third-party repositories (local .repo files: tailscale, uupd COPR)
+COPY files/dnf/*.repo /etc/yum.repos.d/
+
+# Add remaining remote repositories
 RUN dnf config-manager addrepo --from-repofile=https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo && \
     dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
 
@@ -24,6 +27,9 @@ RUN dnf install -y \
     fastfetch \
     pulseaudio-utils \
     brave-origin \
+    gcc make patch \
+    tailscale \
+    uupd \
     --exclude="swaylock,waybar,fuzzel" \
     && dnf clean all
 
@@ -32,7 +38,21 @@ COPY files/system/ /
 
 # Enable greetd display manager and graphical target
 RUN systemctl enable greetd.service && \
+    systemctl enable tailscaled.service && \
+    systemctl enable uupd.timer && \
+    systemctl enable flathub-setup.service && \
+    systemctl enable brew-setup.service && \
     systemctl set-default graphical.target
+
+# Homebrew: stage an image-owned brew tree that brew-setup.service copies into
+# /var/home/linuxbrew on first boot. uupd owns the update cadence.
+COPY files/scripts/install-brew.sh /tmp/install-brew.sh
+RUN chmod +x /tmp/install-brew.sh && \
+    /tmp/install-brew.sh && \
+    rm /tmp/install-brew.sh
+
+# Homebrew analytics opt-out (same as Universal Blue / secureblue)
+RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
 
 # Install Overpass Nerd Font (arch-independent Arch package)
 COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh

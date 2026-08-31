@@ -1,0 +1,9 @@
+[ublue-packages]
+name=Universal Blue packages COPR (uupd only)
+baseurl=https://download.copr.fedorainfracloud.org/results/ublue-os/packages/fedora-$releasever-$basearch/
+enabled=1
+type=rpm-md
+repo_gpgcheck=0
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/ublue-os/packages/pubkey.gpg
+includepkgs=uupd
