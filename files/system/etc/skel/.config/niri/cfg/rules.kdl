@@ -1,0 +1,53 @@
+window-rule {
+    geometry {
+        corner-radius 20
+    }
+    clip-to-geometry true
+}
+
+window-rule {
+    matches [{ app-id = "steam" title = "^$" }]
+    open-floating
+}
+
+window-rule {
+    matches [{ app-id = "steam" title = "^(Friends List|Screenshot|Game Properties|Settings|Downloads|Chat)$" }]
+    open-floating
+    default-floating-position x=480 y=120
+}
+
+window-rule {
+    matches [{ app-id = "steam" title = "^notification" }]
+    open-floating
+    default-floating-position x=1600 y=900
+}
+
+window-rule {
+    matches [{ app-id = "org.gnome.Nautilus" }]
+    default-column-width { fixed 900; }
+}
+
+window-rule {
+    matches [{ app-id = "com.system76.CosmicEdit" }]
+    default-column-width { proportion 0.45; }
+}
+
+window-rule {
+    matches [{ app-id = "noctalia-wallpaper" }]
+    place-within-backdrop
+}
+
+window-rule {
+    matches [{ app-id = "com.mitchellh.ghostty" }]
+    draw-border-with-background false
+}
+
+window-rule {
+    matches [{ app-id = "io.github.lumeer.satty" }]
+    open-floating
+}
+
+window-rule {
+    matches [{ app-id = "it.mijorus.smile" }]
+    open-floating
+}

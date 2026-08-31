@@ -1,0 +1,19 @@
+[mgr]
+prepend_keymap = [
+  { on = "<C-j>", run = "arrow 5", desc = "Move down 5" },
+  { on = "<C-k>", run = "arrow -5", desc = "Move up 5" },
+  { on = "<C-h>", run = "leave", desc = "Go to parent directory" },
+  { on = "<C-l>", run = "enter", desc = "Enter directory" },
+  { on = "<C-Up>", run = "arrow -5", desc = "Move up 5" },
+  { on = "<C-Down>", run = "arrow 5", desc = "Move down 5" },
+  { on = "<C-Left>", run = "leave", desc = "Go to parent directory" },
+  { on = "<C-Right>", run = "enter", desc = "Enter directory" },
+  { on = "<A-Up>", run = "arrow -99999", desc = "Go to top" },
+  { on = "<A-Down>", run = "arrow 99999", desc = "Go to bottom" },
+  { on = "<C-x>", run = "yank --cut", desc = "Cut" },
+  { on = "<C-c>", run = "escape", desc = "Cancel/clear selection" },
+  { on = "<C-v>", run = "paste", desc = "Paste" },
+  { on = "<C-n>", run = "create", desc = "New file/directory" },
+  { on = "<C-r>", run = "rename", desc = "Rename" },
+  { on = "<C-q>", run = "quit", desc = "Quit" },
+]

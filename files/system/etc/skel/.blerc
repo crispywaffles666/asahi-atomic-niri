@@ -1,0 +1,82 @@
+# Inline autosuggestion from history only (no fuzzy filename suggestions)
+bleopt complete_auto_complete_opts=syntax-disabled
+
+# Tab: accept inline autosuggestion, or show menu then cycle through it
+ble-bind -m auto_complete -f TAB auto_complete/insert
+ble-bind -m auto_complete -f C-i auto_complete/insert
+function ble/widget/complete-or-cycle {
+  if [[ $_ble_complete_menu_active ]]; then
+    ble/complete/menu-complete/enter
+  else
+    ble/widget/complete show_menu
+  fi
+}
+ble-bind -m emacs -f TAB complete-or-cycle
+ble-bind -m emacs -f C-i complete-or-cycle
+
+# Match zsh-syntax-highlighting colors
+
+ble-face -s syntax_command fg=green
+ble-face -s command_builtin fg=green
+ble-face -s command_function fg=green
+ble-face -s command_alias fg=green
+ble-face -s command_keyword fg=green
+ble-face -s command_file fg=green
+ble-face -s syntax_error fg=red
+ble-face -s argument_error fg=red
+ble-face -s command_directory fg=green,underline
+ble-face -s filename_directory underline,fg=white
+ble-face -s filename_link underline,fg=white
+ble-face -s filename_other underline,fg=white
+ble-face -s filename_executable underline,fg=white
+ble-face -s filename_ls_colors underline,fg=white
+ble-face -s syntax_quoted fg=yellow
+ble-face -s syntax_quotation fg=yellow
+ble-face -s syntax_param_expansion fg=cyan
+ble-face -s auto_complete fg=gray
+
+# tab completion highlight
+ble-face -s region_insert fg=black,bg=white
+# disable elapsed time display after commands
+bleopt exec_elapsed_enabled=
+# disable EOF marker after output without a trailing newline
+bleopt prompt_eol_mark=''
+# disable error mark on non-zero exit
+bleopt exec_errexit_mark=
+# silent autocd — execute cd directly and show a new prompt
+# (bash's shopt autocd always prints "cd -- <path>" which can't be suppressed)
+function ble/widget/silent-autocd-accept {
+  local trimmed="${_ble_edit_str}"
+  trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+
+  if [[ -n "$trimmed" && "$trimmed" != *[$' \t|;&<>(){}']* ]]; then
+    local expanded=$trimmed
+    if [[ $expanded == '~' ]]; then
+      expanded=$HOME
+    elif [[ $expanded == '~/'* ]]; then
+      expanded=$HOME/${expanded#'~/'}
+    fi
+    if [[ -d "$expanded" ]]; then
+      if [[ "$trimmed" == /* || "$trimmed" == ./* || "$trimmed" == ../* || "$trimmed" == '~'* || "$trimmed" == .. ]] ||
+         ! builtin type -t "$trimmed" &>/dev/null; then
+        builtin cd -- "$expanded" 2>/dev/null || {
+          ble/widget/accept-single-line-or-newline
+          return "$?"
+        }
+        ble-edit/content/clear-arg
+        _ble_edit_line_disabled=1 ble/textarea#render leave
+        ble-edit/content/reset '' newline
+        _ble_edit_ind=0 _ble_edit_mark=0
+        ble/widget/.newline keep-info
+        ble/history/revert-edits
+        ble/textarea#render
+        return 0
+      fi
+    fi
+  fi
+
+  ble/widget/accept-single-line-or-newline
+}
+ble-bind -m emacs -f C-m silent-autocd-accept
+ble-bind -m emacs -f RET silent-autocd-accept

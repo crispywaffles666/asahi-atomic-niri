@@ -1,0 +1,65 @@
+animations {
+    workspace-switch {
+        kind = "horizontal-slide";
+        duration-ms = 350;
+        curve = "spring";
+        spring-damping = 0.12;
+        spring-stiffness = 240;
+        spring-mass = 1;
+    }
+
+    window-open {
+        kind = "scale";
+        duration-ms = 400;
+        curve = "spring";
+        spring-damping = 0.15;
+        spring-stiffness = 300;
+        spring-mass = 1;
+    }
+
+    window-close {
+        kind = "scale";
+        duration-ms = 300;
+        curve = "spring";
+        spring-damping = 0.15;
+        spring-stiffness = 300;
+        spring-mass = 1;
+    }
+
+    window-move {
+        duration-ms = 400;
+        curve = "spring";
+        spring-damping = 0.12;
+        spring-stiffness = 240;
+        spring-mass = 1;
+    }
+
+    window-resize {
+        duration-ms = 350;
+        curve = "spring";
+        spring-damping = 0.15;
+        spring-stiffness = 280;
+        spring-mass = 1;
+    }
+
+    overview-open {
+        duration-ms = 350;
+        curve = "spring";
+        spring-damping = 0.12;
+        spring-stiffness = 240;
+        spring-mass = 1;
+    }
+
+    screenshot-ui {
+        duration-ms = 250;
+        curve = "spring";
+        spring-damping = 0.15;
+        spring-stiffness = 300;
+        spring-mass = 1;
+    }
+
+    config-notification-disappear {
+        duration-ms = 200;
+        curve = "ease-out";
+    }
+}

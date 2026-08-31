@@ -1,0 +1,5 @@
+gestures {
+    hot-corners {
+        bottom-left
+    }
+}

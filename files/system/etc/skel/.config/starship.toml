@@ -1,0 +1,100 @@
+format = """
+[](fg:blue)\
+$directory\
+$git_branch\
+$git_status\
+${custom.no_git_sep}\
+$username\
+$hostname\
+$character"""
+
+right_format = """
+$cmd_duration\
+$jobs\
+$python\
+$conda\
+$nodejs\
+$rust\
+$golang\
+$java\
+$nix_shell\
+"""
+
+add_newline = false
+
+[character]
+success_symbol = " "
+error_symbol = " "
+
+[directory]
+format = "[ $path ](fg:bright-white bg:blue bold)"
+truncation_length = 8
+fish_style_pwd_dir_length = 1
+truncation_symbol = "…/"
+truncate_to_repo = false
+
+[git_branch]
+format = "[](fg:blue bg:green)[ $branch](fg:black bg:green)"
+symbol = ""
+truncation_length = 32
+truncation_symbol = "…"
+
+[git_status]
+format = "[$ahead_behind$stashed$conflicted$staged$modified$untracked ](fg:black bg:green)[](fg:green bg:bright-black)"
+ahead = " ⇡${count}"
+behind = " ⇣${count}"
+diverged = " ⇣${behind_count}⇡${ahead_count}"
+stashed = " *${count}"
+conflicted = " ~${count}"
+staged = " +${count}"
+modified = " !${count}"
+untracked = " ?${count}"
+
+[custom.no_git_sep]
+when = "! git rev-parse --is-inside-work-tree 2>/dev/null"
+format = "[](fg:blue bg:bright-black)"
+shell = ["sh"]
+
+[username]
+format = "[ $user](fg:bright-white bg:bright-black)"
+show_always = true
+
+[hostname]
+format = "[@$hostname ](fg:bright-white bg:bright-black)[▓▒░](fg:bright-black)"
+ssh_only = false
+
+[cmd_duration]
+format = "[](fg:purple)[ $duration ](fg:black bg:purple)"
+min_time = 3_000
+show_milliseconds = false
+
+[jobs]
+format = "[](fg:black)[ ✦ ](fg:cyan bg:black)"
+number_threshold = 1
+
+[python]
+format = "[](fg:blue)[ $virtualenv ](fg:black bg:blue)"
+detect_extensions = []
+detect_files = []
+detect_folders = []
+
+[conda]
+format = "[](fg:blue)[ $environment ](fg:black bg:blue)"
+
+[nodejs]
+format = "[](fg:green)[ $version ](fg:black bg:green)"
+detect_extensions = []
+detect_files = ["package.json", ".node-version"]
+detect_folders = ["node_modules"]
+
+[rust]
+format = "[](fg:#d78700)[ $version ](fg:black bg:#d78700)"
+
+[golang]
+format = "[](fg:blue)[ $version ](fg:black bg:blue)"
+
+[java]
+format = "[](fg:red)[ $version ](fg:white bg:red)"
+
+[nix_shell]
+format = "[](fg:blue)[ $state ](fg:black bg:blue)"

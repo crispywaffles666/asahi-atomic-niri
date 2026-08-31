@@ -1,0 +1,27 @@
+input {
+    keyboard {
+        xkb {
+        }
+    }
+
+    touchpad {
+        tap
+        natural-scroll
+    }
+
+    mouse {
+    }
+
+    trackpoint {
+    }
+
+    // If you have a touchscreen
+    touchscreen {
+    }
+
+    // Disable key repeat when key is held
+    repeat-delay 300
+    repeat-rate 25
+}
+
+workspace-auto-back-and-forth true

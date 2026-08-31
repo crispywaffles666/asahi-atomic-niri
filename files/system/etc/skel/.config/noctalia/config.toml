@@ -1,0 +1,299 @@
+# Noctalia v5 factory defaults
+
+# ── Shell ──
+
+[accessibility]
+ui_scale = 1.0
+
+[shell]
+corner_radius_scale   = 1.0
+font_family           = "Overpass Nerd Font"
+polkit_agent          = true
+telemetry_enabled     = false
+avatar_path           = "~/.face"
+password_style        = "default"
+clipboard_enabled     = true
+app_icon_colorize     = false
+niri_overview_type_to_launch_enabled = true
+
+[shell.screenshot]
+save_to_file      = false
+copy_to_clipboard = false
+
+[shell.animation]
+enabled = true
+speed   = 1.0
+
+[shell.shadow]
+direction = "down"
+alpha     = 0.55
+
+[shell.panel]
+transparency_mode          = "soft"
+borders                    = true
+shadow                     = true
+launcher_placement         = "floating"
+launcher_position          = "center"
+control_center_placement   = "attached"
+session_placement          = "attached"
+open_near_click_control_center = true
+
+# ── Theme ──
+
+[theme]
+source           = "builtin"
+builtin          = "Dracula"
+mode             = "dark"
+wallpaper_scheme = "m3-content"
+
+[backdrop]
+enabled        = true
+blur_intensity = 0.0
+tint_intensity = 0.0
+
+# ── Bar ──
+
+[bar]
+order = ["main"]
+
+[bar.default]
+position           = "top"
+enabled            = true
+thickness          = 34
+background_opacity = 0.93
+radius             = 12
+shadow             = true
+contact_shadow     = false
+margin_edge        = 4
+margin_ends        = 4
+padding            = 14
+widget_spacing     = 6
+panel_overlap      = 1
+auto_hide          = false
+reserve_space      = true
+font_weight        = "regular"
+hover_highlight    = true
+capsule            = true
+capsule_fill       = "surface_variant"
+capsule_thickness  = 0.76
+capsule_radius     = 8.0
+capsule_opacity    = 1.0
+scale              = 1.0
+
+start  = ["workspaces"]
+center = ["clock"]
+end    = ["cpu", "ram", "notifications", "tray", "volume", "control-center"]
+
+# ── Widgets ──
+
+[widget.workspaces]
+label_source               = "id"
+max_label_chars            = 2
+pill_scale                 = 0.8
+active_pill_size           = 1.0
+focused_color              = "primary"
+occupied_color             = "secondary"
+empty_color                = "secondary"
+labels_only_when_occupied  = true
+hide_when_empty            = false
+
+[widget.clock]
+format         = "{:%a %b %d - %I:%M %p}"
+tooltip_format = "{:%H:%M %a, %b %d}"
+
+[widget.cpu]
+type            = "sysmon"
+stat            = "cpu_usage"
+visualization   = "none"
+show_value      = true
+show_glyph      = true
+highlight_color = "error"
+
+[widget.ram]
+type            = "sysmon"
+stat            = "ram_used"
+visualization   = "none"
+show_value      = true
+show_glyph      = true
+highlight_color = "error"
+
+[widget.notifications]
+type                = "notifications"
+hide_when_no_unread = false
+
+[widget.tray]
+drawer  = true
+pinned  = []
+hidden  = []
+
+[widget.volume]
+device      = "output"
+show_label  = false
+
+[widget.volume.actions]
+scroll_up   = "volume-up 5"
+scroll_down = "volume-down 5"
+
+[widget.control-center]
+glyph = "noctalia"
+
+# ── Dock ──
+
+[dock]
+enabled              = false
+position             = "bottom"
+auto_hide            = true
+reserve_space        = false
+icon_size            = 48
+background_opacity   = 1.0
+shadow               = true
+radius               = 16
+magnification        = true
+magnification_scale  = 1.35
+active_scale         = 1.0
+inactive_scale       = 0.85
+inactive_opacity     = 0.6
+show_dots            = true
+show_instance_count  = false
+launcher_position    = "end"
+active_monitor_only  = true
+monitors             = []
+pinned               = ["com.mitchellh.ghostty", "com.brave.Browser"]
+
+# ── Notifications ──
+
+[notification]
+position             = "top_right"
+background_opacity   = 1.0
+layer                = "overlay"
+monitors             = []
+
+[notification.filter.niri-screenshot]
+match         = "niri"
+match_content = "Screenshot captured"
+show_toast    = false
+save_history  = false
+
+# ── Wallpaper ──
+
+[wallpaper]
+enabled             = true
+fill_mode           = "crop"
+fill_color          = "#000000"
+transition          = ["honeycomb"]
+transition_duration = 1500
+edge_smoothness     = 0.05
+directory           = "~/Pictures/"
+
+[wallpaper.automation]
+enabled          = false
+interval_seconds = 300
+order            = "random"
+
+# ── Brightness ──
+
+[brightness]
+enable_ddcutil = true
+sync_all_monitors = true
+
+# ── Idle ──
+
+[idle]
+pre_action_fade_seconds = 2.0
+behavior_order          = ["lock", "screen-off", "suspend"]
+
+[idle.behavior.screen-off]
+timeout = 1200
+action  = "screen_off"
+enabled = true
+
+[idle.behavior.lock]
+timeout = 1260
+action  = "lock"
+enabled = true
+
+[idle.behavior.suspend]
+timeout             = 3600
+action              = "lock_and_suspend"
+enabled             = true
+lock_before_suspend = true
+
+# ── Lock Screen ──
+
+[lockscreen]
+enabled              = true
+fingerprint          = false
+blurred_desktop      = false
+blur_intensity       = 0.0
+tint_intensity       = 0.2
+monitors             = []
+
+# ── OSD ──
+
+[osd]
+position           = "top_right"
+scale              = 1.0
+background_opacity = 1.0
+
+[osd.kinds]
+volume          = true
+brightness      = true
+wifi            = true
+bluetooth       = true
+lock_keys       = true
+keyboard_layout = true
+
+# ── Keybinds ──
+
+[keybinds]
+validate     = ["return", "kp_enter"]
+cancel       = ["escape"]
+
+# ── Session Menu ──
+
+[shell.session]
+grid = false
+
+[[shell.session.actions]]
+action            = "lock"
+enabled           = true
+shortcut          = "1"
+countdown_seconds = 10
+
+[[shell.session.actions]]
+action            = "suspend"
+enabled           = true
+shortcut          = "2"
+countdown_seconds = 10
+
+[[shell.session.actions]]
+action            = "hibernate"
+enabled           = true
+shortcut          = "3"
+countdown_seconds = 10
+
+[[shell.session.actions]]
+action            = "reboot"
+enabled           = true
+shortcut          = "4"
+countdown_seconds = 10
+
+[[shell.session.actions]]
+action            = "logout"
+enabled           = true
+shortcut          = "5"
+countdown_seconds = 10
+
+[[shell.session.actions]]
+action            = "shutdown"
+enabled           = true
+shortcut          = "6"
+countdown_seconds = 10
+
+# ── Misc ──
+
+[location]
+auto_locate = true
+
+[weather]
+unit = "imperial"

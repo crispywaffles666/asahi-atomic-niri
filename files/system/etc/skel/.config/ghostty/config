@@ -1,0 +1,18 @@
+command = /usr/bin/zsh
+font-size = 16
+font-family = "SauceCodePro NFM"
+theme = dracula
+background-opacity = 0.85
+window-padding-x = 1
+window-padding-y = 1
+window-padding-balance = true
+cursor-style = block
+window-save-state = never
+clipboard-trim-trailing-spaces = true
+confirm-close-surface = false
+shell-integration-features = no-cursor
+shell-integration = none
+adjust-cell-height = 2%
+window-decoration = client
+gtk-titlebar = true
+keybind = ctrl+enter=unbind

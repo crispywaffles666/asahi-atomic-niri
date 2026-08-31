@@ -1,0 +1,8 @@
+{
+    "rules": [
+        {
+            "pattern": "*Screenshot captured*",
+            "action": "block"
+        }
+    ]
+}

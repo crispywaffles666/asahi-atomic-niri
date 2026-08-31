@@ -1,0 +1,3 @@
+// Niri automatically enables connected outputs at their preferred modes.
+// Add output blocks here only for machine-specific positioning, scaling,
+// rotation, or workspace assignment.
