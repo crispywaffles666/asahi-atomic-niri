@@ -77,6 +77,13 @@ Three convenience features are layered on top of the base:
   system Flathub remote is added on first boot by `flathub-setup.service`), and
   brew packages. Config lives at `/etc/uupd/config.json`.
 
+  **Update safety:** uupd *stages* OS updates (via bootc/rpm-ostree) but never
+  reboots automatically. To harden against any auto-apply/reboot driver the
+  base image might ship, this image explicitly **masks**
+  `bootc-fetch-apply-updates.timer` and `rpm-ostreed-automatic.timer`, so the
+  *only* automatic OS-update path is uupd's stage-only flow. You decide when to
+  reboot into a staged deployment (see the boot-safety section below).
+
 Homebrew, tailscale, and the flathub system remote assume the machine's primary
 user is UID 1000 (the Fedora/Asahi default).
 
@@ -101,12 +108,134 @@ cosign verify \
   ghcr.io/crispywaffles666/asahi-atomic-niri:latest
 ```
 
+**Runtime signature enforcement:** this image ships the container
+policy/`registries.d` configuration so that, once the image's own `/etc` is in
+place after the first (unverified-transport) rebase, every subsequent pull of
+`ghcr.io/crispywaffles666/asahi-atomic-niri` through bootc/rpm-ostree is
+verified against this committed public key (see the boot-safety section for the
+two-stage rebase). Unrelated registries used by Podman/Distrobox are left
+permissive.
+
 To roll back to a specific dated build:
 
 ```bash
 sudo bootc switch \
   ghcr.io/crispywaffles666/asahi-atomic-niri:44-20260831
 ```
+
+## Asahi Atomic installation / boot safety
+
+> ⚠️ This image is **experimental** and built on top of **unofficial Fedora
+> Asahi Remix Atomic** images. It is **not** endorsed or supported by the Fedora
+> Asahi Remix project or the Asahi Linux project. The Asahi boot chain (m1n1,
+> U-Boot, device trees) is not atomically switchable the way the OS rootfs is;
+> a broken `boot.bin` can leave a Mac unbootable until recovered from macOS or
+> the Asahi recovery. Treat first installs as risky, keep a known-good ESP
+> backup, and do not rely on this working.
+
+**Recommended installation route** — start from a *working* Fedora Asahi
+installation rather than replacing an arbitrary root, so the ESP, m1n1, and
+partitioning are already set up correctly:
+
+```text
+Fedora Asahi Minimal
+→ Fedora Asahi Atomic
+→ asahi-atomic-niri (this image)
+```
+
+Install/`bootc` yourself into the running Asahi Atomic system. This image keeps
+the stock Fedora Asahi kernel, Mesa, firmware, U-Boot, and hardware stack — it
+only adds a desktop and, importantly, a **deployment-aware m1n1/U-Boot/DTB
+refresh** mechanism (below).
+
+**First custom-image rebase (needs the unverified transport once).** Before your
+system has this image's signature policy in `/etc`, the signed transport cannot
+verify. Bootstrap with the unverified registry transport:
+
+```sh
+sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+```
+
+`sudo systemctl reboot`
+
+After rebooting into an image that now contains its own signature policy, switch
+to the signed transport so all future updates are enforced:
+
+```sh
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+```
+
+`sudo systemctl reboot`
+
+(These transport strings are valid for Fedora 44: `ostree-unverified-registry:`
+pulls with HTTPS-only integrity, and `ostree-image-signed:docker://` verifies
+the container image against `/etc/containers/policy.json`, which ships the
+cosign public key for this GHCR namespace.)
+
+**Updates never reboot automatically.** `uupd` stages OS updates via
+bootc/rpm-ostree but does not reboot; the auto-apply/reboot timers
+(`bootc-fetch-apply-updates.timer`, `rpm-ostreed-automatic.timer`) are masked.
+You reboot manually to apply a staged deployment.
+
+**After rebooting into a new deployment, the m1n1 refresh runs once.** The
+oneshot service `asahi-atomic-niri-update-m1n1.service` runs after the new
+deployment boots to `multi-user.target`. It:
+
+1. resolves the *currently booted* deployment's device trees
+   (`/usr/lib/modules/$(uname -r)/dtb`, i.e. the booted deployment's own `/usr`),
+   never a stale `/boot/dtb` (a legacy Fedora ARM symlink — `grubby` is excluded
+   from this Atomic base) and never a lexicographically-newest scan;
+2. verifies it has the safe `gzip -nc` invocation (the fix for
+   [asahi-scripts#71](https://github.com/AsahiLinux/asahi-scripts/issues/71));
+3. runs `update-m1n1` to rewrite the stage-2 payload
+   (`<ESP>/m1n1/boot.bin`) for that exact deployment;
+4. records success for that deployment under `/var/lib/asahi-atomic-niri/`,
+   so it does **not** rerun on every boot and does **not** run for a deployment
+   that already refreshed;
+5. **fails closed** — if `update-m1n1` fails, the deployment is *not* marked
+   done and the service reports failure.
+
+**Another reboot may be required.** The refresh updates `boot.bin` on the ESP;
+that payload is what m1n1 stage-1 actually boots on the *next* boot. So after an
+OS update you typically need **two** reboots: one to boot the new deployment
+(which triggers the refresh), then one to make the freshly-written m1n1/U-Boot
+payload take effect.
+
+**Inspecting status:**
+
+```sh
+bootc status
+systemctl status asahi-atomic-niri-update-m1n1.service
+journalctl -u asahi-atomic-niri-update-m1n1.service
+```
+
+The helper also has a non-destructive `check` (no ESP writes):
+
+```sh
+sudo /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh check
+```
+
+**Rollback.** Because the OS and the ESP payload update independently, roll back
+in this order:
+
+```sh
+# 1) See what you are on and what is staged.
+bootc status
+
+# 2) Roll back the OS deployment (stages the previous image; reboot to apply).
+sudo bootc rollback
+sudo systemctl reboot
+
+# 3) If the new m1n1/U-Boot/DTB payload is causing boot problems, restore the
+#    OS first, then mount the ESP (e.g. `sudo mount /dev/<esp> /mnt`) and
+#    restore a previous `boot.bin` from the `.old` backup that update-m1n1
+#    keeps at `<ESP>/m1n1/boot.bin.old`.
+```
+
+Recovery expectations: the ESP and the OS are separate; if the OS fails to boot,
+the ESP payload (previous m1n1) is still intact and you can boot the previous
+deployment or use macOS/Asahi recovery to restore `boot.bin`. Always keep a
+`boot.bin` backup before experimenting.
 
 ## Building
 
@@ -124,14 +253,22 @@ podman build --platform linux/arm64 -t asahi-atomic-niri .
 The build fails closed on checks in `files/scripts/validate-image.sh` (required
 packages present, no GNOME/KDE session, no gaming/x86 packages, Asahi hardware
 packages present, referenced binaries available, distrobox arm64 manifests,
-per-user flatpak bootstrap present) and on `bootc container lint --fatal-warnings`.
+per-user flatpak bootstrap present) **and** on Asahi boot-chain hardening checks:
+patched `update-m1n1` (exactly the safe `gzip -nc` invocation), the
+deployment-aware DTB/m1n1 helper present and executable (and free of unsafe
+glob-first/latest-directory logic), the `asahi-atomic-niri-update-m1n1.service`
+unit present and enabled, the container signature key / `registries.d` /
+`policy.json` present with the expected GHCR namespace, and the update
+configuration never auto-rebooting (auto-apply timers masked). It then runs a
+non-destructive `gzip -nc` self-test. The final authoritative gate remains
+`bootc container lint --fatal-warnings`.
 
 ## Repository layout
 
 ```
 .
 ├── .github/workflows/build.yml   # CI: build aarch64, push, sign
-├── Containerfile                 # base + packages + config + validation
+├── Containerfile                 # base + packages + config + boot-safety + validation
 ├── files/
 │   ├── dnf/                          # repo files copied into the image
 │   │   ├── tailscale.repo
@@ -139,22 +276,31 @@ per-user flatpak bootstrap present) and on `bootc container lint --fatal-warning
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
 │   │   ├── install-brew.sh           # stage homebrew at build time
-│   │   └── validate-image.sh         # build-time assertions
+│   │   ├── patch-update-m1n1.sh      # fail-closed Atomic (gzip -nc) patch
+│   │   └── validate-image.sh         # build-time assertions + boot-safety checks
 │   └── system/                      # copied into the image
 │       ├── etc/
-│       │   ├── distrobox/distrobox.ini   # arm64 container presets
+│       │   ├── containers/
+│       │   │   ├── policy.json          # sigstoreSigned for this GHCR namespace
+│       │   │   └── registries.d/…yaml   # sigstore attachments
+│       │   ├── distrobox/distrobox.ini  # arm64 container presets
 │       │   ├── greetd/config.toml
+│       │   ├── pki/containers/…pub      # cosign public key
 │       │   ├── profile.d/brew.sh
-│       │   ├── skel/                # /etc/skel dotfiles
+│       │   ├── skel/                    # /etc/skel dotfiles
 │       │   ├── systemd/logind.conf.d/
 │       │   └── uupd/config.json
 │       └── usr/
 │           ├── lib/
 │           │   ├── systemd/
-│           │   │   ├── system/brew-setup.service, flathub-setup.service
-│           │   │   └── user/config-flatpaks.service  # per-user Flatpaks
-│           │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf
-│           ├── libexec/asahi-niri/config-flatpaks.sh
+│           │   │   ├── system/
+│           │   │   │   ├── asahi-atomic-niri-update-m1n1.service  # deploy-aware refresh
+│           │   │   │   ├── brew-setup.service, flathub-setup.service
+│           │   │   │   └── user/config-flatpaks.service  # per-user Flatpaks
+│           │   │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf
+│           │   └── libexec/
+│           │       ├── asahi-atomic-niri/update-m1n1-helper.sh  # DTB/m1n1 helper
+│           │       └── asahi-niri/config-flatpaks.sh
 │           └── share/glib-2.0/schemas/zz_asahi-atomic-niri.gschema.override
 └── cosign.pub
 ```

@@ -63,13 +63,40 @@ COPY files/system/ /
 
 # The per-user flatpak bootstrap script ships in /usr/libexec and must be
 # executable (git does not preserve the exec bit through COPY).
-RUN chmod +x /usr/libexec/asahi-niri/config-flatpaks.sh
+RUN chmod +x /usr/libexec/asahi-niri/config-flatpaks.sh && \
+    chmod +x /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh
+
+# --- Asahi Atomic boot-chain hardening ---
+# 1) Fail-closed patch of the stock `update-m1n1`: OSTree canonicalizes /usr
+#    files to epoch-zero mtime, which makes `gzip -c` abort (status 2, "file
+#    timestamp out of range") and, under set -e, cancels the m1n1/U-Boot
+#    refresh. `gzip -nc` omits the volatile header metadata and fixed the bug.
+#    The patch refuses to build unless the exact expected line exists exactly
+#    once. https://github.com/AsahiLinux/asahi-scripts/issues/71
+COPY files/scripts/patch-update-m1n1.sh /tmp/patch-update-m1n1.sh
+RUN chmod +x /tmp/patch-update-m1n1.sh && \
+    /tmp/patch-update-m1n1.sh && \
+    rm /tmp/patch-update-m1n1.sh
+
+# Non-destructive proof that the patched gzip -nc invocation is safe against the
+# image's installed U-Boot (writes only a temp file; never touches the ESP).
+RUN /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh gzip-check
+
+# Enable the deploy-aware m1n1 refresh (oneshot that runs only once a newly
+# booted deployment reaches multi-user, then records success; idempotent).
+RUN systemctl enable asahi-atomic-niri-update-m1n1.service
 
 # Enable greetd display manager, networking/switch service, automatic updates,
 # the per-user flatpak bootstrap, and the desktop plumbing services, then set the
 # graphical target. CUPS and Bluetooth use socket activation (cups.socket) so they
 # only start when first needed. power-profiles-daemon provides CPU performance
 # profile control on Apple Silicon and is socket-activated by its own service.
+#
+# Automatic OS updates: only `uupd.timer` is enabled. uupd stages bootc/rpm-ostree
+# updates but never reboots. To harden against any latent auto-apply/reboot
+# driver shipping in the base (fail closed), explicitly mask the bootc and
+# rpm-ostree automatic update timers so the *only* automatic OS update path is
+# uupd (stage, no reboot). This does not touch uupd itself or Flatpak/Brew.
 RUN systemctl enable greetd.service && \
     systemctl enable tailscaled.service && \
     systemctl enable uupd.timer && \
@@ -78,6 +105,8 @@ RUN systemctl enable greetd.service && \
     systemctl enable cups.socket && \
     systemctl enable bluetooth.service && \
     systemctl enable power-profiles-daemon.service && \
+    systemctl mask bootc-fetch-apply-updates.timer && \
+    systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
 
 # Homebrew: stage an image-owned brew tree that brew-setup.service copies into

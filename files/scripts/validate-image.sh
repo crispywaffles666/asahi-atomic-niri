@@ -159,6 +159,8 @@ REQUIRED_BINARIES=(
     gst-inspect-1.0
     ffmpeg
     ffprobe
+    gzip
+    update-m1n1
 )
 
 for binary in "${REQUIRED_BINARIES[@]}"; do
@@ -213,6 +215,108 @@ fi
 # coverage present so `bootc container lint --fatal-warnings` keeps passing.
 if [[ ! -r /usr/lib/tmpfiles.d/zz-asahi-atomic-niri.conf ]]; then
     fail "missing bootc var-tmpfiles coverage: zz-asahi-atomic-niri.conf"
+fi
+
+# ---------------------------------------------------------------------------
+# Asahi Atomic boot-chain hardening validation
+# ---------------------------------------------------------------------------
+
+# 1) The stock `update-m1n1` must carry the Atomic-safe gzip invocation and
+#    MUST NOT retain the unfixed one. Exactly one safe invocation expected.
+UPDATE_M1N1=/usr/bin/update-m1n1
+if [[ ! -f "$UPDATE_M1N1" ]]; then
+    fail "patched update-m1n1 not found: $UPDATE_M1N1"
+fi
+_safe_gzip=$(grep -Fxc 'gzip -nc "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
+_bad_gzip=$(grep -Fxc 'gzip -c "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
+if [[ "$_safe_gzip" -ne 1 ]]; then
+    fail "update-m1n1 must contain EXACTLY ONE 'gzip -nc ...' invocation (found $_safe_gzip)"
+fi
+if [[ "$_bad_gzip" -ne 0 ]]; then
+    fail "update-m1n1 still contains the unfixed 'gzip -c ...' invocation (found $_bad_gzip)"
+fi
+
+# 2) Deployment-aware DTB helper must exist and be executable.
+HELPER=/usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh
+if [[ ! -x "$HELPER" ]]; then
+    fail "deployment-aware DTB/m1n1 helper not found or not executable: $HELPER"
+fi
+
+# 3) m1n1 refresh systemd unit exists and is enabled for multi-user.
+UNIT=asahi-atomic-niri-update-m1n1.service
+if [[ ! -f "/usr/lib/systemd/system/$UNIT" ]]; then
+    fail "m1n1 refresh systemd unit missing: $UNIT"
+fi
+if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$UNIT" ]]; then
+    fail "m1n1 refresh unit is not enabled (no multi-user.target.wants symlink)"
+fi
+
+# 4) The helper must NOT use unsafe glob-first / latest-directory selection.
+#    It must resolve DTBs from the booted deployment's own /usr tree (keyed off
+#    the booted kernel release), never by scanning /boot/ostree/* or picking the
+#    lexicographically-newest directory.
+if grep -Eq '/boot/ostree|sort -r|sort -V|tail -n 1|head -n 1|ls .*\|.*(head|tail|sort)' "$HELPER"; then
+    fail "m1n1 helper appears to use unsafe glob-first/latest-directory logic"
+fi
+if ! grep -q 'uname -r' "$HELPER"; then
+    fail "m1n1 helper does not key its DTB resolution off the booted deployment kernel (uname -r)"
+fi
+if ! grep -Eq '/dtb|/dtbs' "$HELPER"; then
+    fail "m1n1 helper does not resolve a device-tree directory under the deployment module root"
+fi
+# The module root must resolve to the standard /usr/lib/modules location by
+# default (that is where dracut-asahi installs each deployment's DTBs).
+if ! grep -q '/usr/lib/modules' "$HELPER"; then
+    fail "m1n1 helper does not reference the standard /usr/lib/modules deployment tree"
+fi
+
+# 5) Container signature public key must be present.
+SIG_KEY=/etc/pki/containers/ghcr.io-crispywaffles666-asahi-atomic-niri.pub
+if [[ ! -s "$SIG_KEY" ]]; then
+    fail "container signature public key missing: $SIG_KEY"
+fi
+
+# 6) Registries sigstore config must exist and enable sigstore attachments for
+#    this exact GHCR namespace.
+REGCFG=/etc/containers/registries.d/ghcr.io-crispywaffles666-asahi-atomic-niri.yaml
+if [[ ! -r "$REGCFG" ]]; then
+    fail "registries sigstore config missing: $REGCFG"
+fi
+grep -q 'use-sigstore-attachments: true' "$REGCFG" \
+    || fail "registries config missing use-sigstore-attachments"
+grep -q 'ghcr.io/crispywaffles666/asahi-atomic-niri' "$REGCFG" \
+    || fail "registries config missing GHCR namespace"
+
+# 7) Container policy must contain the expected GHCR namespace and be JSON.
+POLICY=/etc/containers/policy.json
+if [[ ! -r "$POLICY" ]]; then
+    fail "container policy missing: $POLICY"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$POLICY" 2>/dev/null; then
+        fail "container policy is not valid JSON: $POLICY"
+    fi
+fi
+grep -q '"ghcr.io/crispywaffles666/asahi-atomic-niri"' "$POLICY" \
+    || fail "container policy missing GHCR namespace"
+grep -q '"type": "sigstoreSigned"' "$POLICY" \
+    || fail "container policy missing sigstoreSigned rule"
+
+# 8) Update configuration must never auto-reboot: the only auto-update timer is
+#    uupd (stage-only), and the bootc/rpm-ostree auto-apply timers are masked.
+if [[ ! -r /etc/uupd/config.json ]]; then
+    fail "uupd config missing: /etc/uupd/config.json"
+fi
+for _t in bootc-fetch-apply-updates.timer rpm-ostreed-automatic.timer; do
+    if [[ ! -L "/etc/systemd/system/$_t" ]] || [[ "$(readlink "/etc/systemd/system/$_t")" != "/dev/null" ]]; then
+        fail "auto-reboot-capable update timer is not masked: $_t"
+    fi
+done
+
+# 9) Non-destructive, build-time-safe proof that the patched `gzip -nc` works
+#    against the installed U-Boot without writing the ESP.
+if ! "$HELPER" gzip-check; then
+    fail "gzip -nc self-test against installed U-Boot failed"
 fi
 
 echo "Image validation passed."
