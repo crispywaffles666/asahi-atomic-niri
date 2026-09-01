@@ -72,6 +72,9 @@ Three convenience features are layered on top of the base:
   default user (UID 1000); brew analytics are disabled.
 - **Tailscale** — installed from Tailscale's official RPM repository with
   `tailscaled.service` enabled. Run `sudo tailscale up` to join your tailnet.
+- **keyd** — installed from the `alternateved/keyd` COPR with `keyd.service`
+  enabled; system-wide key remapping (remap keys/layers at the evdev level,
+  config in `/etc/keyd/default.conf`, reload with `sudo keyd reload`).
 - **Automatic updates** — `uupd` (from the Universal Blue `ublue-os/packages`
   COPR) runs daily via `uupd.timer` and updates the OS via bootc, flatpaks (a
   system Flathub remote is added on first boot by `flathub-setup.service`), and
@@ -284,6 +287,7 @@ refresh. The final authoritative gate remains `bootc container lint
 ├── files/
 │   ├── dnf/                          # repo files copied into the image
 │   │   ├── tailscale.repo
+│   │   ├── keyd.repo                  # keyd COPR
 │   │   └── ublue-packages.repo       # uupd COPR
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts

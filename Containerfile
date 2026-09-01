@@ -30,6 +30,8 @@ RUN dnf install -y \
     gcc make patch \
     tailscale \
     uupd \
+    # keyd: system-wide key remapping daemon (alternateved/keyd COPR).
+    keyd \
     # Containerized dev environments. distrobox is a wrapper around podman,
     # which the base-atomic image already ships (minimal-plus manifest).
     distrobox \
@@ -104,6 +106,7 @@ RUN systemctl enable asahi-atomic-niri-update-m1n1.service
 # uupd (stage, no reboot). This does not touch uupd itself or Flatpak/Brew.
 RUN systemctl enable greetd.service && \
     systemctl enable tailscaled.service && \
+    systemctl enable keyd.service && \
     systemctl enable uupd.timer && \
     systemctl enable flathub-setup.service && \
     systemctl enable brew-setup.service && \

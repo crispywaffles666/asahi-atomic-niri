@@ -1,0 +1,9 @@
+[keyd]
+name=keyd COPR (alternateved)
+baseurl=https://download.copr.fedorainfracloud.org/results/alternateved/keyd/fedora-$releasever-$basearch/
+enabled=1
+type=rpm-md
+repo_gpgcheck=0
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/alternateved/keyd/pubkey.gpg
+includepkgs=keyd

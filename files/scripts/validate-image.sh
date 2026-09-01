@@ -16,6 +16,7 @@ REQUIRED_PACKAGES=(
     nautilus
     tailscale
     uupd
+    keyd
     # Containerized dev environments + Flatpak runtime
     distrobox
     flatpak
@@ -145,6 +146,7 @@ REQUIRED_BINARIES=(
     pactl
     tailscaled
     uupd
+    keyd
     distrobox
     flatpak
     gsettings
@@ -272,6 +274,15 @@ if [[ ! -f "/usr/lib/systemd/system/$UNIT" ]]; then
 fi
 if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$UNIT" ]]; then
     fail "m1n1 refresh unit is not enabled (no multi-user.target.wants symlink)"
+fi
+
+# 3b) keyd remapping daemon unit exists and is enabled for multi-user.
+KEYD_UNIT=keyd.service
+if [[ ! -f "/usr/lib/systemd/system/$KEYD_UNIT" ]]; then
+    fail "keyd systemd unit missing: $KEYD_UNIT"
+fi
+if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$KEYD_UNIT" ]]; then
+    fail "keyd unit is not enabled (no multi-user.target.wants symlink)"
 fi
 
 # 4) The helper must NOT use unsafe glob-first / latest-directory selection.
