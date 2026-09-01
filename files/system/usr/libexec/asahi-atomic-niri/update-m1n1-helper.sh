@@ -197,7 +197,7 @@ cmd_refresh() {
 
     # Hand the deployment-aware DTB directory to update-m1n1 through a
     # namespaced override that the patched script applies AFTER Fedora's own
-    # config (/etc/default/update-m1n1) has been sourced. Plain DTBS is
+    # config (/etc/sysconfig/update-m1n1) has been sourced. Plain DTBS is
     # deliberately unset so a persistent /etc config can never silently win.
     # (The patched update-m1n1 assigns: [ -n "${ASAHI_ATOMIC_DTBS:-}" ] &&
     # DTBS="$ASAHI_ATOMIC_DTBS", before the DTBS empty-check/use.)

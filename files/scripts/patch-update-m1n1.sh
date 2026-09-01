@@ -12,7 +12,7 @@
 #     https://github.com/AsahiLinux/asahi-scripts/issues/71
 #
 #  B) Namespaced DTB override. Fedora's `update-m1n1` sources its own config
-#     (/etc/default/update-m1n1) near startup; that config is allowed to set
+#     (/etc/sysconfig/update-m1n1) near startup; that config is allowed to set
 #     `DTBS` unconditionally and would otherwise silently clobber the
 #     deployment-aware DTB directory exported by this image's helper. To make
 #     the handoff explicit and provable, we inject a namespaced override that is
@@ -155,8 +155,8 @@ if [[ -z "$override_pos" || -z "$check_pos" || "$override_pos" -ge "$check_pos" 
 fi
 
 # The override must also appear after the config default is sourced.
-# The config default source line must be present exactly once.
-CONFIG_LINE='[ -e /etc/default/update-m1n1 ] && . /etc/default/update-m1n1'
+# The Fedora config default source line must be present exactly once.
+CONFIG_LINE='[ -e /etc/sysconfig/update-m1n1 ] && . /etc/sysconfig/update-m1n1'
 config_pos="$(grep -nF -- "$CONFIG_LINE" "$tmp" | cut -d: -f1)"
 if [[ -z "$config_pos" ]]; then
     echo "ERROR: cannot locate the update-m1n1 config source line; ordering unprovable." >&2

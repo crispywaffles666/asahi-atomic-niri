@@ -188,7 +188,7 @@ deployment boots to `multi-user.target`. It:
 2. passes that deployment-aware DTB directory to `update-m1n1` through the
    namespaced `ASAHI_ATOMIC_DTBS` override. The patched `update-m1n1` applies
    this override *after* Fedora's normal `update-m1n1` configuration (e.g.
-   `/etc/default/update-m1n1`) is sourced, so persistent `/etc` state that sets
+   `/etc/sysconfig/update-m1n1`) is sourced, so persistent `/etc` state that sets
    `DTBS` cannot silently replace the deployment-aware DTBs. (This is a
    hardening behavior of this image's patched copy; it is *not* official Fedora
    Asahi behavior.)

@@ -246,7 +246,7 @@ if ! grep -Fxq '    DTBS="$ASAHI_ATOMIC_DTBS"' "$UPDATE_M1N1"; then
     fail "update-m1n1 ASAHI_ATOMIC_DTBS override missing its DTBS assignment line"
 fi
 # The override must appear after the stock config source line ...
-_config_line_n=$(grep -nF '[ -e /etc/default/update-m1n1 ] && . /etc/default/update-m1n1' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+_config_line_n=$(grep -nF '[ -e /etc/sysconfig/update-m1n1 ] && . /etc/sysconfig/update-m1n1' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
 _override_line_n=$(grep -nF 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
 _check_line_n=$(grep -nF 'if [ -z "$DTBS" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
 if [[ -z "$_config_line_n" || -z "$_override_line_n" || -z "$_check_line_n" ]]; then
@@ -378,7 +378,7 @@ chmod +x "$_ov_script"
 # two I/O paths are redirected; the config-sourcing -> override -> DTBS-check
 # ordering and the override application run verbatim.
 sed -i \
-    -e "s|^\[ -e /etc/default/update-m1n1 \] && \. /etc/default/update-m1n1\$|[ -e \"\$_ov_fake_default\" ] \&\& . \"\$_ov_fake_default\"|" \
+    -e "s|^\[ -e /etc/sysconfig/update-m1n1 \] \&\& \. /etc/sysconfig/update-m1n1\$|[ -e \"\$_ov_fake_default\" ] \&\& . \"\$_ov_fake_default\"|" \
     -e 's|^m1n1config=/run/m1n1\.conf$|m1n1config="$ASAHI_ATOMIC_TMP"/m1n1.conf|' \
     "$_ov_script"
 
