@@ -71,8 +71,13 @@ RUN chmod +x /usr/libexec/asahi-niri/config-flatpaks.sh && \
 #    files to epoch-zero mtime, which makes `gzip -c` abort (status 2, "file
 #    timestamp out of range") and, under set -e, cancels the m1n1/U-Boot
 #    refresh. `gzip -nc` omits the volatile header metadata and fixed the bug.
-#    The patch refuses to build unless the exact expected line exists exactly
-#    once. https://github.com/AsahiLinux/asahi-scripts/issues/71
+#    https://github.com/AsahiLinux/asahi-scripts/issues/71
+# 2) The same patch inserts a namespaced ASAHI_ATOMIC_DTBS override that is
+#    applied AFTER Fedora's update-m1n1 config is sourced but BEFORE DTBS is
+#    validated/used, so a persistent /etc config setting a stale DTBS can never
+#    silently replace the deployment-aware DTB directory the helper passes in.
+#    The patch refuses to build unless every expected anchor exists exactly once
+#    and the ordering can be proven.
 COPY files/scripts/patch-update-m1n1.sh /tmp/patch-update-m1n1.sh
 RUN chmod +x /tmp/patch-update-m1n1.sh && \
     /tmp/patch-update-m1n1.sh && \

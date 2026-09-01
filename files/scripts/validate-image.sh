@@ -236,6 +236,29 @@ if [[ "$_bad_gzip" -ne 0 ]]; then
     fail "update-m1n1 still contains the unfixed 'gzip -c ...' invocation (found $_bad_gzip)"
 fi
 
+# 1b) Namespaced DTB override must be present EXACTLY ONCE and ordered so it is
+#     applied after the stock config is sourced but before DTBS is validated.
+_override_count=$(grep -Fxc 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" || true)
+if [[ "$_override_count" -ne 1 ]]; then
+    fail "update-m1n1 must contain EXACTLY ONE ASAHI_ATOMIC_DTBS override (found $_override_count)"
+fi
+if ! grep -Fxq '    DTBS="$ASAHI_ATOMIC_DTBS"' "$UPDATE_M1N1"; then
+    fail "update-m1n1 ASAHI_ATOMIC_DTBS override missing its DTBS assignment line"
+fi
+# The override must appear after the stock config source line ...
+_config_line_n=$(grep -nF '[ -e /etc/default/update-m1n1 ] && . /etc/default/update-m1n1' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+_override_line_n=$(grep -nF 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+_check_line_n=$(grep -nF 'if [ -z "$DTBS" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+if [[ -z "$_config_line_n" || -z "$_override_line_n" || -z "$_check_line_n" ]]; then
+    fail "cannot locate config/override/DTBS-check lines in update-m1n1; ordering unprovable"
+fi
+if [[ "$_config_line_n" -ge "$_override_line_n" ]]; then
+    fail "update-m1n1 ASAHI_ATOMIC_DTBS override is not applied after config sourcing"
+fi
+if [[ "$_override_line_n" -ge "$_check_line_n" ]]; then
+    fail "update-m1n1 ASAHI_ATOMIC_DTBS override is not applied before the DTBS empty check"
+fi
+
 # 2) Deployment-aware DTB helper must exist and be executable.
 HELPER=/usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh
 if [[ ! -x "$HELPER" ]]; then
@@ -268,6 +291,16 @@ fi
 # default (that is where dracut-asahi installs each deployment's DTBs).
 if ! grep -q '/usr/lib/modules' "$HELPER"; then
     fail "m1n1 helper does not reference the standard /usr/lib/modules deployment tree"
+fi
+# The helper must hand off through the namespaced ASAHI_ATOMIC_DTBS override and
+# must NOT rely on exporting plain DTBS (a persistent /etc config could silently
+# clobber an exported plain DTBS).
+if ! grep -q 'export ASAHI_ATOMIC_DTBS=' "$HELPER"; then
+    fail "m1n1 helper does not export the ASAHI_ATOMIC_DTBS namespaced override"
+fi
+if grep -Eq '^[[:space:]]*export[[:space:]]+DTBS=' "$HELPER" \
+   || grep -Eq '^[[:space:]]*export[[:space:]]+DTBS$' "$HELPER"; then
+    fail "m1n1 helper still exports the plain DTBS variable (must use ASAHI_ATOMIC_DTBS)"
 fi
 
 # 5) Container signature public key must be present.
@@ -318,5 +351,76 @@ done
 if ! "$HELPER" gzip-check; then
     fail "gzip -nc self-test against installed U-Boot failed"
 fi
+
+# 10) Behavioral conflict test: a stock/default config setting a stale `DTBS`
+#     must NOT override the deployment-aware ASAHI_ATOMIC_DTBS value.
+#
+#     Approach: copy the patched /usr/bin/update-m1n1 and redirect only its
+#     hardcoded config-source path and throwaway m1n1config to temp files, so the
+#     real config-sourcing -> override-application ordering is exercised verbatim
+#     while the ESP is never mounted/written. We then set a DELIBERATELY WRONG
+#     DTBS in the fake config, provide the correct deployment DTB dir through
+#     ASAHI_ATOMIC_DTBS, point TARGET at a temp payload, and assert the payload
+#     contains the correct DTBs and not the stale config path.
+_ov_test_root="$(mktemp -d)"
+_ov_cleanup() { rm -rf "${_ov_test_root:-}"; }
+trap _ov_cleanup EXIT
+mkdir -p "$_ov_test_root/apple"
+
+# A copy of the real, already-patched script.
+_ov_script="$_ov_test_root/update-m1n1"
+cp "$UPDATE_M1N1" "$_ov_script"
+chmod +x "$_ov_script"
+
+# Redirect the stock config-source line so the copy sources OUR temp fake default
+# (with the deliberately wrong DTBS) instead of the real /etc, and redirect the
+# throwaway per-run m1n1 config so nothing touches /run or the ESP. Only these
+# two I/O paths are redirected; the config-sourcing -> override -> DTBS-check
+# ordering and the override application run verbatim.
+sed -i \
+    -e "s|^\[ -e /etc/default/update-m1n1 \] && \. /etc/default/update-m1n1\$|[ -e \"\$_ov_fake_default\" ] \&\& . \"\$_ov_fake_default\"|" \
+    -e 's|^m1n1config=/run/m1n1\.conf$|m1n1config="$ASAHI_ATOMIC_TMP"/m1n1.conf|' \
+    "$_ov_script"
+
+# Fake functions.sh next to the copy (update-m1n1 sources $(dirname $0)/functions.sh)
+cat > "$_ov_test_root/functions.sh" <<'EOF'
+#!/bin/sh
+warn()  { echo "WARN: $*" >&2; }
+info()  { echo "INFO: $*" >&2; }
+mount_sys_esp() { mkdir -p "$1"; }
+EOF
+
+# 1) Fake default config sets a deliberately WRONG, stale DTBS.
+printf 'DTBS=/definitely/wrong/stale-dtb\n' > "$_ov_test_root/fake-default"
+# 2) Correct deployment-aware DTB dir (as the helper would resolve).
+printf 'CORRECT-DEPLOYMENT-DTB\n'   > "$_ov_test_root/apple/t6MARKER.dtb"
+printf 'CORRECT-DEPLOYMENT-DTB2\n'  > "$_ov_test_root/apple/t81MARKER.dtb"
+
+# 3) Minimal m1n1 / U-Boot source payloads for the copy.
+printf 'M1N1PAYLOAD\n'  > "$_ov_test_root/m1n1.bin"
+printf 'UBOOTNODTB\n'   > "$_ov_test_root/u-boot-nodtb.bin"
+
+# 4) Invoke the copied, patched logic with the conflicting config and the
+#    deployment override.
+_ov_out="$_ov_test_root/boot.bin"
+if ! ( cd "$_ov_test_root" && \
+       ASAHI_ATOMIC_TMP="$_ov_test_root" \
+       _ov_fake_default="$_ov_test_root/fake-default" \
+       M1N1="$_ov_test_root/m1n1.bin" \
+       U_BOOT="$_ov_test_root/u-boot-nodtb.bin" \
+       TARGET="$_ov_out" \
+       ASAHI_ATOMIC_DTBS="$_ov_test_root" \
+       sh "$_ov_script" >/dev/null 2>&1 ); then
+    fail "patched update-m1n1 conflicting-config behavioral run failed"
+fi
+# 5) The effective DTBS must be the deployment dir (payload contains its DTBs).
+if ! grep -q 'CORRECT-DEPLOYMENT-DTB' "$_ov_out"; then
+    fail "ASAHI_ATOMIC_DTBS override lost: payload does not contain deployment DTB"
+fi
+if grep -Eq 'definitely/wrong|/stale-dtb' "$_ov_out"; then
+    fail "stale config DTBS won: payload contains wrong/stale DTB path"
+fi
+trap - EXIT
+_ov_cleanup
 
 echo "Image validation passed."

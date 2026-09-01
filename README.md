@@ -185,14 +185,21 @@ deployment boots to `multi-user.target`. It:
    (`/usr/lib/modules/$(uname -r)/dtb`, i.e. the booted deployment's own `/usr`),
    never a stale `/boot/dtb` (a legacy Fedora ARM symlink — `grubby` is excluded
    from this Atomic base) and never a lexicographically-newest scan;
-2. verifies it has the safe `gzip -nc` invocation (the fix for
+2. passes that deployment-aware DTB directory to `update-m1n1` through the
+   namespaced `ASAHI_ATOMIC_DTBS` override. The patched `update-m1n1` applies
+   this override *after* Fedora's normal `update-m1n1` configuration (e.g.
+   `/etc/default/update-m1n1`) is sourced, so persistent `/etc` state that sets
+   `DTBS` cannot silently replace the deployment-aware DTBs. (This is a
+   hardening behavior of this image's patched copy; it is *not* official Fedora
+   Asahi behavior.)
+3. verifies it has the safe `gzip -nc` invocation (the fix for
    [asahi-scripts#71](https://github.com/AsahiLinux/asahi-scripts/issues/71));
-3. runs `update-m1n1` to rewrite the stage-2 payload
+4. runs `update-m1n1` to rewrite the stage-2 payload
    (`<ESP>/m1n1/boot.bin`) for that exact deployment;
-4. records success for that deployment under `/var/lib/asahi-atomic-niri/`,
+5. records success for that deployment under `/var/lib/asahi-atomic-niri/`,
    so it does **not** rerun on every boot and does **not** run for a deployment
    that already refreshed;
-5. **fails closed** — if `update-m1n1` fails, the deployment is *not* marked
+6. **fails closed** — if `update-m1n1` fails, the deployment is *not* marked
    done and the service reports failure.
 
 **Another reboot may be required.** The refresh updates `boot.bin` on the ESP;
@@ -254,14 +261,19 @@ The build fails closed on checks in `files/scripts/validate-image.sh` (required
 packages present, no GNOME/KDE session, no gaming/x86 packages, Asahi hardware
 packages present, referenced binaries available, distrobox arm64 manifests,
 per-user flatpak bootstrap present) **and** on Asahi boot-chain hardening checks:
-patched `update-m1n1` (exactly the safe `gzip -nc` invocation), the
-deployment-aware DTB/m1n1 helper present and executable (and free of unsafe
-glob-first/latest-directory logic), the `asahi-atomic-niri-update-m1n1.service`
-unit present and enabled, the container signature key / `registries.d` /
-`policy.json` present with the expected GHCR namespace, and the update
-configuration never auto-rebooting (auto-apply timers masked). It then runs a
-non-destructive `gzip -nc` self-test. The final authoritative gate remains
-`bootc container lint --fatal-warnings`.
+patched `update-m1n1` (exactly the safe `gzip -nc` invocation) **and** the
+namespaced `ASAHI_ATOMIC_DTBS` override (present exactly once, applied after
+config sourcing and before `DTBS` validation), the deployment-aware DTB/m1n1
+helper present and executable (free of unsafe glob-first/latest-directory
+logic, exporting `ASAHI_ATOMIC_DTBS` rather than plain `DTBS`), the
+`asahi-atomic-niri-update-m1n1.service` unit present and enabled, the container
+signature key / `registries.d` / `policy.json` present with the expected GHCR
+namespace, and the update configuration never auto-rebooting (auto-apply timers
+masked). It then runs a non-destructive `gzip -nc` self-test and a
+non-destructive behavioral conflict test proving that a stale config-provided
+`DTBS` cannot override the deployment-aware path during an `update-m1n1`
+refresh. The final authoritative gate remains `bootc container lint
+--fatal-warnings`.
 
 ## Repository layout
 
@@ -276,7 +288,7 @@ non-destructive `gzip -nc` self-test. The final authoritative gate remains
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
 │   │   ├── install-brew.sh           # stage homebrew at build time
-│   │   ├── patch-update-m1n1.sh      # fail-closed Atomic (gzip -nc) patch
+│   │   ├── patch-update-m1n1.sh      # fail-closed Atomic patch (gzip -nc + ASAHI_ATOMIC_DTBS override)
 │   │   └── validate-image.sh         # build-time assertions + boot-safety checks
 │   └── system/                      # copied into the image
 │       ├── etc/

@@ -18,8 +18,11 @@
 #                                                 #   (/usr/lib/kernel/install.d/15-...)
 #   DTBS    := ${DTBDIR}/apple/t6*.dtb ${DTBDIR}/apple/t81*.dtb   # all Apple M-series DTBs
 #
-# update-m1n1 is invoked with DTBS exported so it embeds the booted deployment's
-# DTBs (plus m1n1 + gzipped U-Boot) into boot.bin.
+# update-m1n1 is invoked with ASAHI_ATOMIC_DTBS exported (the deployment-aware
+# DTB directory), so it embeds the booted deployment's DTBs (plus m1n1 +
+# gzipped U-Boot) into boot.bin. The patched update-m1n1 applies this namespaced
+# override after its own config is sourced, so persistent /etc state cannot
+# silently replace the deployment-aware DTBs.
 #
 # Subcommands:
 #   deployment-id  Print the stable booted-deployment identifier (fail closed).
@@ -192,9 +195,14 @@ cmd_refresh() {
 
     [[ -x "$UPDATE_M1N1" ]] || failclosed "'$UPDATE_M1N1' not found or not executable"
 
-    # Export DTBS (update-m1n1 reads it; it must be a directory so the script
-    # expands the platform globs itself).
-    export DTBS="$dtb"
+    # Hand the deployment-aware DTB directory to update-m1n1 through a
+    # namespaced override that the patched script applies AFTER Fedora's own
+    # config (/etc/default/update-m1n1) has been sourced. Plain DTBS is
+    # deliberately unset so a persistent /etc config can never silently win.
+    # (The patched update-m1n1 assigns: [ -n "${ASAHI_ATOMIC_DTBS:-}" ] &&
+    # DTBS="$ASAHI_ATOMIC_DTBS", before the DTBS empty-check/use.)
+    unset DTBS || true
+    export ASAHI_ATOMIC_DTBS="$dtb"
     log "refreshing m1n1/U-Boot/DTBs from $dtb (deployment $id)"
     if ! "$UPDATE_M1N1"; then
         # Fail closed: do NOT mark this deployment done.
