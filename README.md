@@ -126,126 +126,444 @@ sudo bootc switch \
   ghcr.io/crispywaffles666/asahi-atomic-niri:44-20260831
 ```
 
-## Asahi Atomic installation / boot safety
+# Installing asahi-atomic-niri
 
-> ⚠️ This image is **experimental** and built on top of **unofficial Fedora
-> Asahi Remix Atomic** images. It is **not** endorsed or supported by the Fedora
-> Asahi Remix project or the Asahi Linux project. The Asahi boot chain (m1n1,
-> U-Boot, device trees) is not atomically switchable the way the OS rootfs is;
-> a broken `boot.bin` can leave a Mac unbootable until recovered from macOS or
-> the Asahi recovery. Treat first installs as risky, keep a known-good ESP
-> backup, and do not rely on this working.
+> [!WARNING]
+> This is an experimental installation procedure.
+>
+> Fedora Asahi Atomic itself is experimental, and the procedure below uses
+> `bootc install to-existing-root` in a way that is not currently an officially
+> supported Fedora Asahi installation path.
+>
+> It has been tested on an M2 MacBook, but expect to need macOS or another
+> working Asahi installation for recovery.
+>
+> Keep macOS recovery available. Keeping an existing Linux installation until
+> the Atomic system is proven working is strongly recommended.
 
-**Recommended installation route** — start from a *working* Fedora Asahi
-installation rather than replacing an arbitrary root, so the ESP, m1n1, and
-partitioning are already set up correctly:
+## Overview
+
+The tested installation path is:
 
 ```text
-Fedora Asahi Minimal
-→ Fedora Asahi Atomic
-→ asahi-atomic-niri (this image)
+macOS
+  ↓
+Fedora Asahi Remix 44 Minimal
+  ↓
+bootc takeover with Fedora Asahi base-atomic:44
+  ↓
+repair Asahi ESP boot.bin + vendor firmware
+  ↓
+Fedora Asahi Atomic
+  ↓
+asahi-atomic-niri
 ```
 
-Install/`bootc` yourself into the running Asahi Atomic system. This image keeps
-the stock Fedora Asahi kernel, Mesa, firmware, U-Boot, and hardware stack — it
-only adds a desktop and, importantly, a **deployment-aware m1n1/U-Boot/DTB
-refresh** mechanism (below).
+The awkward part is the Minimal → Atomic takeover.
 
-**First custom-image rebase (needs the unverified transport once).** Before your
-system has this image's signature policy in `/etc`, the signed transport cannot
-verify. Bootstrap with the unverified registry transport:
+Generic `bootc install to-existing-root` successfully creates the OSTree/bootc
+deployment, but in testing it did not preserve all of the per-install Asahi
+state living on the ESP.
+
+Specifically, the takeover removed or failed to preserve:
+
+- `/m1n1/boot.bin`
+- the per-machine `vendorfw` payload
+
+Both must be restored before the resulting Atomic install is fully usable.
+
+## 1. Install Fedora Asahi Remix Minimal
+
+From macOS:
 
 ```sh
-sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+curl https://alx.sh | sh
 ```
 
-`sudo systemctl reboot`
+Install:
 
-After rebooting into an image that now contains its own signature policy, switch
-to the signed transport so all future updates are enforced:
+```text
+Fedora Asahi Remix 44 Minimal
+```
+
+Boot it and complete the normal first-boot setup.
+
+Verify that the system works before continuing:
 
 ```sh
-sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+uname -a
+findmnt -T /
+findmnt -T /boot
+findmnt -T /boot/efi
+nmcli device
 ```
 
-`sudo systemctl reboot`
+A normal Fedora Asahi Minimal installation should have:
 
-(These transport strings are valid for Fedora 44: `ostree-unverified-registry:`
-pulls with HTTPS-only integrity, and `ostree-image-signed:docker://` verifies
-the container image against `/etc/containers/policy.json`, which ships the
-cosign public key for this GHCR namespace.)
+```text
+/          Btrfs
+/boot      ext4
+/boot/efi  FAT32 EFI - ASAHI
+```
 
-**Updates never reboot automatically.** `uupd` stages OS updates via
-bootc/rpm-ostree but does not reboot; the auto-apply/reboot timers
-(`bootc-fetch-apply-updates.timer`, `rpm-ostreed-automatic.timer`) are masked.
-You reboot manually to apply a staged deployment.
+Do not continue until Fedora Minimal boots successfully.
 
-**After rebooting into a new deployment, the m1n1 refresh runs once.** The
-oneshot service `asahi-atomic-niri-update-m1n1.service` runs after the new
-deployment boots to `multi-user.target`. It:
+## 2. Install Podman
 
-1. resolves the *currently booted* deployment's device trees
-   (`/usr/lib/modules/$(uname -r)/dtb`, i.e. the booted deployment's own `/usr`),
-   never a stale `/boot/dtb` (a legacy Fedora ARM symlink — `grubby` is excluded
-   from this Atomic base) and never a lexicographically-newest scan;
-2. passes that deployment-aware DTB directory to `update-m1n1` through the
-   namespaced `ASAHI_ATOMIC_DTBS` override. The patched `update-m1n1` applies
-   this override *after* Fedora's normal `update-m1n1` configuration (e.g.
-   `/etc/sysconfig/update-m1n1`) is sourced, so persistent `/etc` state that sets
-   `DTBS` cannot silently replace the deployment-aware DTBs. (This is a
-   hardening behavior of this image's patched copy; it is *not* official Fedora
-   Asahi behavior.)
-3. verifies it has the safe `gzip -nc` invocation (the fix for
-   [asahi-scripts#71](https://github.com/AsahiLinux/asahi-scripts/issues/71));
-4. runs `update-m1n1` to rewrite the stage-2 payload
-   (`<ESP>/m1n1/boot.bin`) for that exact deployment;
-5. records success for that deployment under `/var/lib/asahi-atomic-niri/`,
-   so it does **not** rerun on every boot and does **not** run for a deployment
-   that already refreshed;
-6. **fails closed** — if `update-m1n1` fails, the deployment is *not* marked
-   done and the service reports failure.
+```sh
+sudo dnf install -y podman
+```
 
-**Another reboot may be required.** The refresh updates `boot.bin` on the ESP;
-that payload is what m1n1 stage-1 actually boots on the *next* boot. So after an
-OS update you typically need **two** reboots: one to boot the new deployment
-(which triggers the refresh), then one to make the freshly-written m1n1/U-Boot
-payload take effect.
+## 3. Convert the Fedora root to Atomic
 
-**Inspecting status:**
+Run the Fedora Asahi Atomic base image as the bootc installer:
+
+```sh
+sudo podman run --rm \
+  --privileged \
+  --pid=host \
+  --ipc=host \
+  --security-opt label=disable \
+  -v /var/lib/containers:/var/lib/containers \
+  -v /dev:/dev \
+  -v /:/target \
+  quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44 \
+  bootc install to-existing-root \
+  --acknowledge-destructive
+```
+
+Do not use:
+
+```text
+--security-opt label=type:unconfined_t
+```
+
+On the tested Fedora Asahi Minimal system that caused `crun` to fail while
+writing `/proc/self/attr/keycreate`.
+
+A successful takeover ends with:
+
+```text
+Installation complete!
+```
+
+Generic EFI/`efibootmgr` warnings may also appear.
+
+## 4. Expected first boot failure: missing m1n1/boot.bin
+
+After the takeover, the first reboot may stop in m1n1 with:
+
+```text
+Chainloading <PARTUUID>;m1n1/boot.bin
+Chainload failed: FATError(NotFound)
+No valid payload found
+```
+
+This means stage-1 m1n1 still knows which ESP belongs to the installation, but
+the takeover removed:
+
+```text
+/m1n1/boot.bin
+```
+
+from that ESP.
+
+The tested recovery method was to boot another working Asahi Linux installation
+and reconstruct the Fedora ESP's `m1n1/boot.bin` using Fedora Asahi's m1n1,
+U-Boot, and matching kernel DTBs.
+
+Do not write another installation's `boot.bin` to the Fedora ESP.
+
+Identify the Fedora ESP by PARTUUID, not by remembered partition number.
+
+Example inspection:
+
+```sh
+lsblk -o NAME,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS
+blkid
+```
+
+After `boot.bin` has been restored, Fedora Atomic should boot.
+
+> [!NOTE]
+> This recovery step should eventually be automated. Until then, consider the
+> Minimal → Atomic takeover an expert-only procedure.
+
+## 5. Recover or defer creation of the primary user
+
+The bootc takeover may not preserve the user created by Fedora Minimal.
+
+If necessary, use a temporary systemd debug shell from the GRUB kernel command
+line:
+
+```text
+systemd.debug_shell=1
+```
+
+Boot normally, then switch to TTY9:
+
+```text
+Ctrl+Alt+F9
+```
+
+If SELinux prevents account modification:
+
+```sh
+setenforce 0
+```
+
+If you want to create the user immediately, replace `<username>` with your
+desired login name:
+
+```sh
+useradd -u 1000 -U -G wheel -m -d /var/home/<username> <username>
+passwd <username>
+```
+
+Verify:
+
+```sh
+id <username>
+```
+
+Expected:
+
+```text
+uid=1000(<username>) gid=1000(<username>) groups=1000(<username>),10(wheel)
+```
+
+Remove `systemd.debug_shell=1` after recovery. It exposes an unauthenticated
+root shell.
+
+If the goal is to inherit this image's `/etc/skel`, it is better to delay final
+user creation until after rebasing to `asahi-atomic-niri`.
+
+## 6. Restore Apple vendor firmware
+
+After the bootc takeover, the Broadcom hardware may be visible but Wi-Fi can be
+missing from NetworkManager:
+
+```sh
+nmcli device
+```
+
+may show only:
+
+```text
+lo
+```
+
+while:
+
+```sh
+lspci -nnk
+```
+
+still shows the BCM4387 device and `dmesg` contains `brcmfmac` firmware failures
+with error `-2`.
+
+From macOS, run the Asahi installer again:
+
+```sh
+curl https://alx.sh | sh
+```
+
+Choose:
+
+```text
+v: Rebuild vendor firmware package
+```
+
+and select the Fedora Atomic installation.
+
+### Known installer issue after bootc takeover
+
+The takeover may have removed:
+
+```text
+/EFI - ASAHI/asahi/
+```
+
+from the Fedora ESP.
+
+In that case the firmware rebuild can successfully copy the actual vendor
+firmware and then crash while trying to write:
+
+```text
+/asahi/all_firmware.tar.gz
+```
+
+with:
+
+```text
+FileNotFoundError: ... /asahi/all_firmware.tar.gz
+```
+
+The useful `vendorfw` payload may already have been installed.
+
+Reboot Fedora and check:
+
+```sh
+nmcli device
+```
+
+If `wlan0` exists, the runtime firmware repair succeeded.
+
+If desired, the missing ESP directory can be recreated from macOS before
+rerunning the firmware rebuild:
+
+```sh
+diskutil mount <FEDORA_ESP>
+sudo mkdir -p "/Volumes/EFI - ASAHI/asahi"
+```
+
+Never guess the ESP device. Identify it first.
+
+## 7. Verify stock Atomic
+
+Once the system boots and networking works:
 
 ```sh
 bootc status
-systemctl status asahi-atomic-niri-update-m1n1.service
-journalctl -u asahi-atomic-niri-update-m1n1.service
+rpm-ostree status
+uname -a
+nmcli device
 ```
 
-The helper also has a non-destructive `check` (no ESP writes):
+At this point the system should report:
 
-```sh
-sudo /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh check
+```text
+quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 ```
 
-**Rollback.** Because the OS and the ESP payload update independently, roll back
-in this order:
+as its booted image.
+
+## 8. Rebase to asahi-atomic-niri
+
+The first rebase must use the unverified transport because this image's
+signature policy is not installed yet:
 
 ```sh
-# 1) See what you are on and what is staged.
-bootc status
+sudo rpm-ostree rebase \
+  ostree-unverified-registry:ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+```
 
-# 2) Roll back the OS deployment (stages the previous image; reboot to apply).
-sudo bootc rollback
+Reboot:
+
+```sh
 sudo systemctl reboot
-
-# 3) If the new m1n1/U-Boot/DTB payload is causing boot problems, restore the
-#    OS first, then mount the ESP (e.g. `sudo mount /dev/<esp> /mnt`) and
-#    restore a previous `boot.bin` from the `.old` backup that update-m1n1
-#    keeps at `<ESP>/m1n1/boot.bin.old`.
 ```
 
-Recovery expectations: the ESP and the OS are separate; if the OS fails to boot,
-the ESP payload (previous m1n1) is still intact and you can boot the previous
-deployment or use macOS/Asahi recovery to restore `boot.bin`. Always keep a
-`boot.bin` backup before experimenting.
+## 9. First custom-image boot
+
+Check:
+
+```sh
+bootc status
+
+systemctl status \
+  asahi-atomic-niri-update-m1n1.service \
+  --no-pager -l
+
+journalctl -b \
+  -u asahi-atomic-niri-update-m1n1.service \
+  --no-pager
+```
+
+The image's deployment-aware m1n1 service should rebuild `boot.bin` using the
+DTBs belonging to the currently booted deployment.
+
+If it succeeds, reboot again:
+
+```sh
+sudo systemctl reboot
+```
+
+This second reboot is the first boot using the newly generated
+m1n1/U-Boot/DTB payload.
+
+## 10. Enable signature enforcement
+
+After successfully booting the custom image:
+
+```sh
+sudo rpm-ostree rebase \
+  ostree-image-signed:docker://ghcr.io/crispywaffles666/asahi-atomic-niri:latest
+```
+
+Then:
+
+```sh
+sudo systemctl reboot
+```
+
+Future updates of this image are now verified against the public signing key
+shipped by the image.
+
+## 11. Create the primary user
+
+If you deliberately postponed user creation so that the custom image's
+`/etc/skel` is used, replace `<username>` with your desired login name:
+
+```sh
+sudo useradd \
+  -u 1000 \
+  -U \
+  -G wheel \
+  -m \
+  -d /var/home/<username> \
+  <username>
+
+sudo passwd <username>
+```
+
+Verify:
+
+```sh
+id <username>
+ls -la /var/home/<username>
+```
+
+The new home should be populated from the custom image's `/etc/skel`.
+
+## What the takeover currently breaks
+
+Observed during the first successful M2 installation:
+
+| Component | Result |
+|---|---|
+| OSTree deployment | Works |
+| Fedora `/boot` conversion | Works |
+| GRUB | Works |
+| Apple boot-policy stub | Preserved |
+| ESP `/m1n1/boot.bin` | **Lost, manual repair required** |
+| Vendor firmware | **Lost, rebuild required** |
+| Wi-Fi | Returns after vendor firmware rebuild |
+| Existing local user | **Not preserved** |
+| Custom image rebase | Works |
+| `/etc/skel` on user creation | Works |
+| Custom m1n1 refresh | Must be verified after first custom boot |
+
+## Recovery philosophy
+
+Do not treat the ESP as part of the atomic root filesystem.
+
+There are three independent pieces of state:
+
+```text
+Apple boot policy / stub APFS
+        ↓
+Asahi ESP
+  - m1n1/boot.bin
+  - vendorfw
+        ↓
+OSTree / bootc deployment
+```
+
+A successful bootc deployment does not imply that the Asahi ESP is valid.
+
+Until the bootstrap procedure is automated, keep macOS recovery and preferably
+another working Asahi install available.
 
 ## Building
 
