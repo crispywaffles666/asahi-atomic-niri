@@ -8,8 +8,17 @@
   "license": "MIT",
   "repository": "https://github.com/noctalia-dev/noctalia-plugins",
   "description": "Provides a Polkit authentication agent.",
-  "tags": ["System", "Security"],
-  "entryPoints": { "main": "Main.qml" },
-  "dependencies": { "plugins": [] },
-  "metadata": { "defaultSettings": {} }
+  "tags": [
+    "System",
+    "Security"
+  ],
+  "entryPoints": {
+    "main": "Main.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "defaultSettings": {}
+  }
 }

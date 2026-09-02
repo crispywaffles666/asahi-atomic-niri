@@ -1,9 +1,9 @@
-# Noctalia v5 factory defaults
+# Noctalia v5 — migrated from v4 settings.json
 
 # ── Shell ──
 
 [accessibility]
-ui_scale = 1.0
+ui_scale = 1.2
 
 [shell]
 corner_radius_scale   = 1.0
@@ -14,7 +14,6 @@ avatar_path           = "~/.face"
 password_style        = "default"
 clipboard_enabled     = true
 app_icon_colorize     = false
-niri_overview_type_to_launch_enabled = true
 
 [shell.screenshot]
 save_to_file      = false
@@ -36,20 +35,6 @@ launcher_placement         = "floating"
 launcher_position          = "center"
 control_center_placement   = "attached"
 session_placement          = "attached"
-open_near_click_control_center = true
-
-# ── Theme ──
-
-[theme]
-source           = "builtin"
-builtin          = "Dracula"
-mode             = "dark"
-wallpaper_scheme = "m3-content"
-
-[backdrop]
-enabled        = true
-blur_intensity = 0.0
-tint_intensity = 0.0
 
 # ── Bar ──
 
@@ -78,24 +63,34 @@ capsule_fill       = "surface_variant"
 capsule_thickness  = 0.76
 capsule_radius     = 8.0
 capsule_opacity    = 1.0
-scale              = 1.0
+scale              = 1.2
 
-start  = ["workspaces"]
+start  = ["workspaces", "active-window"]
 center = ["clock"]
-end    = ["cpu", "ram", "notifications", "tray", "volume", "control-center"]
+end    = ["cpu", "ram", "notifications", "battery", "tray", "volume", "control-center"]
+
+[bar.default.dead_zone.actions]
+right = "none"
 
 # ── Widgets ──
 
 [widget.workspaces]
 label_source               = "id"
+show_labels                = true
 max_label_chars            = 2
-pill_scale                 = 0.8
-active_pill_size           = 1.0
+pill_scale                 = 0.6
 focused_color              = "primary"
 occupied_color             = "secondary"
 empty_color                = "secondary"
 labels_only_when_occupied  = true
 hide_when_empty            = false
+
+[widget.active-window]
+type          = "active_window"
+display       = "icon_only"
+max_length    = 145
+icon_size     = 14
+title_scroll  = "on_hover"
 
 [widget.clock]
 format         = "{:%a %b %d - %I:%M %p}"
@@ -106,7 +101,6 @@ type            = "sysmon"
 stat            = "cpu_usage"
 visualization   = "none"
 show_value      = true
-show_glyph      = true
 highlight_color = "error"
 
 [widget.ram]
@@ -114,12 +108,15 @@ type            = "sysmon"
 stat            = "ram_used"
 visualization   = "none"
 show_value      = true
-show_glyph      = true
 highlight_color = "error"
 
 [widget.notifications]
 type                = "notifications"
 hide_when_no_unread = false
+
+[widget.battery]
+type       = "battery"
+show_label = false
 
 [widget.tray]
 drawer  = true
@@ -140,7 +137,7 @@ glyph = "noctalia"
 # ── Dock ──
 
 [dock]
-enabled              = false
+enabled              = true
 position             = "bottom"
 auto_hide            = true
 reserve_space        = false
@@ -158,7 +155,7 @@ show_instance_count  = false
 launcher_position    = "end"
 active_monitor_only  = true
 monitors             = []
-pinned               = ["com.mitchellh.ghostty", "com.brave.Browser"]
+pinned               = ["brave-origin-beta", "com.mitchellh.ghostty"]
 
 # ── Notifications ──
 
@@ -177,45 +174,38 @@ save_history  = false
 # ── Wallpaper ──
 
 [wallpaper]
-enabled             = true
+enabled             = false
 fill_mode           = "crop"
 fill_color          = "#000000"
 transition          = ["honeycomb"]
 transition_duration = 1500
 edge_smoothness     = 0.05
-directory           = "~/Pictures/"
+directory           = "/home/burnt/Pictures/Wallpapers"
 
 [wallpaper.automation]
 enabled          = false
 interval_seconds = 300
 order            = "random"
 
-# ── Brightness ──
-
-[brightness]
-enable_ddcutil = true
-sync_all_monitors = true
-
 # ── Idle ──
 
 [idle]
 pre_action_fade_seconds = 2.0
-behavior_order          = ["lock", "screen-off", "suspend"]
 
 [idle.behavior.screen-off]
-timeout = 1200
+timeout = 600
 action  = "screen_off"
 enabled = true
 
 [idle.behavior.lock]
-timeout = 1260
+timeout = 660
 action  = "lock"
 enabled = true
 
 [idle.behavior.suspend]
-timeout             = 3600
-action              = "lock_and_suspend"
-enabled             = true
+timeout            = 1800
+action             = "lock_and_suspend"
+enabled            = true
 lock_before_suspend = true
 
 # ── Lock Screen ──
@@ -289,11 +279,3 @@ action            = "shutdown"
 enabled           = true
 shortcut          = "6"
 countdown_seconds = 10
-
-# ── Misc ──
-
-[location]
-auto_locate = true
-
-[weather]
-unit = "imperial"

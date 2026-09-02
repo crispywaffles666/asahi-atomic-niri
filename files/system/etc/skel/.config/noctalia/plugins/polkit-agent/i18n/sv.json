@@ -1,6 +1,18 @@
 {
-    "window": { "title": "Autentisering krävs" },
-    "prompt": { "password": "Lösenord" },
-    "action": { "cancel": "Avbryt", "authenticate": "Autentisera" },
-    "error": { "failed": { "title": "Autentisering misslyckades", "message": "Det angivna lösenordet var felaktigt." } }
+    "window": {
+        "title": "Autentisering krävs"
+    },
+    "prompt": {
+        "password": "Lösenord"
+    },
+    "action": {
+        "cancel": "Avbryt",
+        "authenticate": "Autentisera"
+    },
+    "error": {
+        "failed": {
+            "title": "Autentisering misslyckades",
+            "message": "Det angivna lösenordet var felaktigt."
+        }
+    }
 }

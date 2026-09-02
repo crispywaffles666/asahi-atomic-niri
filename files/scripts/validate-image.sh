@@ -142,6 +142,7 @@ REQUIRED_BINARIES=(
     inotifywait
     notify-send
     xdg-open
+    jq
     fastfetch
     pactl
     tailscaled
@@ -220,6 +221,49 @@ if [[ ! -r /usr/lib/tmpfiles.d/zz-asahi-atomic-niri.conf ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Niri skel config must parse with the niri version installed in this image
+# ---------------------------------------------------------------------------
+# `niri validate` parses the whole config.hierarchy (config.kdl + includes) and
+# fails closed on removed syntax. This is what the stale pre-25.08 cfg tripped
+# on (kind= animations, matches=[], geometry{...}, renamed bind actions) while
+# old CI only grepped filenames. Runtime niri in the image is new enough.
+NIRI_SKEL=/etc/skel/.config/niri
+if [[ ! -f "$NIRI_SKEL/config.kdl" ]]; then
+    fail "skel niri config.kdl missing: $NIRI_SKEL/config.kdl"
+fi
+_validate_home="$(mktemp -d)"
+mkdir -p "$_validate_home/.config"
+cp -r "$NIRI_SKEL" "$_validate_home/.config/niri"
+if ! HOME="$_validate_home" XDG_CONFIG_HOME="$_validate_home/.config" niri validate; then
+    fail "skel niri config failed niri validate (removed option or broken include?)"
+fi
+rm -rf "$_validate_home"
+
+# Every $HOME/.local/bin/ helper the skel niri config spawns must actually ship
+# (executable) in the skel, so autostart/keybinds can't point at a script the
+# image does not provide.
+_skel_bin=/etc/skel/.local/bin
+for _ref in $(grep -rhoE '\$HOME/\.local/bin/[A-Za-z0-9._-]+\.sh' "$NIRI_SKEL" | sort -u || true); do
+    _script="${_ref##*/}"
+    if [[ ! -x "$_skel_bin/$_script" ]]; then
+        fail "skel niri config spawns missing helper script: $_script"
+    fi
+done
+
+# keyd remap config ships in the skel so new users get the Mac key layer without
+# any manual setup (keyd reads ~/.config/keyd/default.conf in addition to
+# /etc/keyd/; matches the owner's live dotfiles).
+if [[ ! -r /etc/skel/.config/keyd/default.conf ]]; then
+    fail "skel keyd config missing: /etc/skel/.config/keyd/default.conf"
+fi
+
+# nvim config ships in the skel (bootstrap for users who install nvim
+# themselves); it is NOT required to have nvim installed in the image.
+if [[ ! -r /etc/skel/.config/nvim/init.lua ]]; then
+    fail "skel nvim config missing: /etc/skel/.config/nvim/init.lua"
+fi
+
+# ---------------------------------------------------------------------------
 # Asahi Atomic boot-chain hardening validation
 # ---------------------------------------------------------------------------
 
@@ -283,6 +327,21 @@ if [[ ! -f "/usr/lib/systemd/system/$KEYD_UNIT" ]]; then
 fi
 if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$KEYD_UNIT" ]]; then
     fail "keyd unit is not enabled (no multi-user.target.wants symlink)"
+fi
+
+# 3c) GNOME Keyring daemon must be enabled in the USER session so the keyring
+#     (pkcs11 + secrets) starts for every user at login without a manual
+#     `systemctl --user enable --now gnome-keyring-daemon.socket`. Fedora 44's
+#     socket unit has [Install] WantedBy=sockets.target, so the enablement
+#     symlink belongs in /etc/systemd/user/sockets.target.wants/.
+GNOME_KEYRING_SOCKET=gnome-keyring-daemon.socket
+if [[ ! -f "/usr/lib/systemd/user/$GNOME_KEYRING_SOCKET" ]]; then
+    fail "gnome-keyring user socket unit missing: $GNOME_KEYRING_SOCKET"
+fi
+if [[ ! -L "/etc/systemd/user/sockets.target.wants/$GNOME_KEYRING_SOCKET" ]] \
+   || [[ "$(readlink "/etc/systemd/user/sockets.target.wants/$GNOME_KEYRING_SOCKET")" \
+         != "/usr/lib/systemd/user/$GNOME_KEYRING_SOCKET" ]]; then
+    fail "gnome-keyring socket is not enabled (missing or wrong sockets.target.wants symlink)"
 fi
 
 # 4) The helper must NOT use unsafe glob-first / latest-directory selection.

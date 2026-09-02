@@ -1,6 +1,18 @@
 {
-    "window": { "title": "Autentisering krevst" },
-    "prompt": { "password": "Passord" },
-    "action": { "cancel": "Avbryt", "authenticate": "Autentiser" },
-    "error": { "failed": { "title": "Autentisering mislukkast", "message": "Passordet du skreiv inn var feil." } }
+    "window": {
+        "title": "Autentisering krevst"
+    },
+    "prompt": {
+        "password": "Passord"
+    },
+    "action": {
+        "cancel": "Avbryt",
+        "authenticate": "Autentiser"
+    },
+    "error": {
+        "failed": {
+            "title": "Autentisering mislukkast",
+            "message": "Passordet du skreiv inn var feil."
+        }
+    }
 }

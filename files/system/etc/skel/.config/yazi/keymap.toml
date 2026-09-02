@@ -1,5 +1,6 @@
 [mgr]
 prepend_keymap = [
+  # Navigation
   { on = "<C-j>", run = "arrow 5", desc = "Move down 5" },
   { on = "<C-k>", run = "arrow -5", desc = "Move up 5" },
   { on = "<C-h>", run = "leave", desc = "Go to parent directory" },
@@ -10,10 +11,14 @@ prepend_keymap = [
   { on = "<C-Right>", run = "enter", desc = "Enter directory" },
   { on = "<A-Up>", run = "arrow -99999", desc = "Go to top" },
   { on = "<A-Down>", run = "arrow 99999", desc = "Go to bottom" },
+
+  # File operations
   { on = "<C-x>", run = "yank --cut", desc = "Cut" },
   { on = "<C-c>", run = "escape", desc = "Cancel/clear selection" },
   { on = "<C-v>", run = "paste", desc = "Paste" },
   { on = "<C-n>", run = "create", desc = "New file/directory" },
   { on = "<C-r>", run = "rename", desc = "Rename" },
+
+  # Quit
   { on = "<C-q>", run = "quit", desc = "Quit" },
 ]

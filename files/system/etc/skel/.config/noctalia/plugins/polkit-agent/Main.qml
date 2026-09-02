@@ -15,7 +15,7 @@ Item {
 
     PolkitAgent {
         id: agent
-
+        
         onIsActiveChanged: {
             if (isActive) {
                 openWindow()

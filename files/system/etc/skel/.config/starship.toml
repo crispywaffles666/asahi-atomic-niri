@@ -26,6 +26,8 @@ add_newline = false
 success_symbol = " "
 error_symbol = " "
 
+# --- Left prompt ---
+
 [directory]
 format = "[ $path ](fg:bright-white bg:blue bold)"
 truncation_length = 8
@@ -62,6 +64,8 @@ show_always = true
 [hostname]
 format = "[@$hostname ](fg:bright-white bg:bright-black)[▓▒░](fg:bright-black)"
 ssh_only = false
+
+# --- Right prompt ---
 
 [cmd_duration]
 format = "[](fg:purple)[ $duration ](fg:black bg:purple)"

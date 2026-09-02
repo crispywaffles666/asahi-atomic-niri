@@ -1,3 +1,10 @@
-// Niri automatically enables connected outputs at their preferred modes.
-// Add output blocks here only for machine-specific positioning, scaling,
-// rotation, or workspace assignment.
+// ────────────── Output Configuration ──────────────
+
+output "eDP-1" {
+    mode "2560x1600@60.000"
+    scale 1.5
+}
+
+workspace "1" {}
+workspace "2" {}
+workspace "3" {}

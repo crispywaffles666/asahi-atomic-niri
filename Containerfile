@@ -24,6 +24,8 @@ RUN dnf install -y \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
     libnotify xdg-utils \
+    # jq: the skel helper script auto-fullwidth-dp3.sh parses `niri msg --json` output.
+    jq \
     fastfetch \
     pulseaudio-utils \
     brave-origin \
@@ -116,6 +118,18 @@ RUN systemctl enable greetd.service && \
     systemctl mask bootc-fetch-apply-updates.timer && \
     systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
+
+# Enable the GNOME Keyring daemon socket in the USER session so the keyring
+# (pkcs11 + secrets) starts for every user at login without needing a manual
+# `systemctl --user enable --now gnome-keyring-daemon.socket`. systemctl --user
+# cannot run at build time (no user manager in the image), so create the exact
+# enablement symlink `systemctl --user enable` would create: the Fedora 44
+# gnome-keyring-daemon.socket has [Install] WantedBy=sockets.target, so the
+# symlink lives in /etc/systemd/user/sockets.target.wants/. It is checked by
+# validate-image.sh.
+RUN mkdir -p /etc/systemd/user/sockets.target.wants && \
+    ln -sf /usr/lib/systemd/user/gnome-keyring-daemon.socket \
+        /etc/systemd/user/sockets.target.wants/gnome-keyring-daemon.socket
 
 # Homebrew: stage an image-owned brew tree that brew-setup.service copies into
 # /var/home/linuxbrew on first boot. uupd owns the update cadence.
