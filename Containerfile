@@ -1,3 +1,14 @@
+FROM registry.fedoraproject.org/fedora:44 AS theme-builder
+
+# Theme generation and archive tooling stay in this disposable stage.
+RUN dnf install -y --setopt=install_weak_deps=False \
+    bash coreutils curl gzip sassc sed tar gtk-update-icon-cache && \
+    dnf clean all
+
+COPY files/scripts/install-themes.sh /tmp/install-themes.sh
+RUN chmod +x /tmp/install-themes.sh && \
+    /tmp/install-themes.sh
+
 FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 
 # Brave cannot unpack through the base image's dangling /opt link. A real /opt
@@ -20,8 +31,6 @@ RUN dnf install -y \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
     libnotify xdg-utils \
-    # The bundled icon theme needs its index built below.
-    gtk-update-icon-cache \
     # auto-fullwidth-dp3.sh reads `niri msg --json` output.
     jq \
     fastfetch \
@@ -54,9 +63,13 @@ RUN dnf install -y \
     && dnf clean all
 
 # Keep shared themes under /usr so all users get the same read-only files.
-COPY files/themes/ /usr/share/themes/
-COPY files/icons/ /usr/share/icons/
-RUN gtk-update-icon-cache /usr/share/icons/dracula-icons-main
+# Only generated artifacts leave the builder; source and sassc stay behind.
+RUN rm -rf /usr/share/themes/Graphite-purple-Dark-dracula \
+           /usr/share/icons/dracula-icons-main
+COPY --from=theme-builder /usr/share/themes/Graphite-purple-Dark-dracula /usr/share/themes/Graphite-purple-Dark-dracula
+COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/dracula-icons-main
+COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
+COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
 
 COPY files/system/ /
 

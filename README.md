@@ -48,6 +48,14 @@ gnome-disk-utility, CUPS (printing), bluez + blueman (Bluetooth),
 power-profiles-daemon (CPU performance profiles), file-roller (archives),
 evince (PDF), eog (image viewer).
 
+**Themes:** `Graphite-purple-Dark-dracula` is generated with `sassc` from the
+pinned upstream Graphite Dracula-support merge commit. The unmodified upstream
+Dracula icon theme is installed as `dracula-icons-main`. Their immutable commit
+archives are SHA-256 verified by `files/scripts/install-themes.sh` during image
+construction; a disposable build stage keeps source trees and build-only
+dependencies out of the final image while retaining upstream licensing
+notices.
+
 User dotfiles and configs (`/etc/skel`): niri (`config.kdl` + `cfg/`), Noctalia,
 bash/zsh/starship, alacritty, ghostty, micro, geany, btop, cava, fastfetch,
 satty, yazi, and the helper scripts `niri-overview-autoclose.sh`,
@@ -629,7 +637,8 @@ podman build --platform linux/arm64 -t asahi-atomic-niri .
 The build fails closed on checks in `files/scripts/validate-image.sh` (required
 packages present, no GNOME/KDE session, no gaming/x86 packages, Asahi hardware
 packages present, referenced binaries available, distrobox arm64 manifests,
-per-user flatpak bootstrap present) **and** on Asahi boot-chain hardening checks:
+per-user flatpak bootstrap present, generated GTK 3/4 theme assets, Dracula
+icon index/cache, and exact configured theme names) **and** on Asahi boot-chain hardening checks:
 patched `update-m1n1` (exactly the safe `gzip -nc` invocation) **and** the
 namespaced `ASAHI_ATOMIC_DTBS` override (present exactly once, applied after
 config sourcing and before `DTBS` validation), the deployment-aware DTB/m1n1
@@ -662,6 +671,7 @@ refresh. The final authoritative gate remains `bootc container lint
 │   │   └── ublue-packages.repo       # uupd COPR
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
+│   │   ├── install-themes.sh         # checksum-verified pinned GTK/icon sources
 │   │   ├── install-brew.sh           # stage homebrew at build time
 │   │   ├── install-asahi-brightnessd.sh  # build/install pinned upstream ALS daemon (kbd-only patch applied)
 │   │   ├── patch-update-m1n1.sh      # fail-closed Atomic patch (gzip -nc + ASAHI_ATOMIC_DTBS override)

@@ -126,6 +126,50 @@ for package in "${REQUIRED_ASAHI_PACKAGES[@]}"; do
     fi
 done
 
+# Theme build dependencies and sources stay in the disposable builder stage.
+if rpm -q --quiet sassc; then
+    fail "theme build-only package leaked into the final image: sassc"
+fi
+
+GRAPHITE_THEME=/usr/share/themes/Graphite-purple-Dark-dracula
+GRAPHITE_FILES=(
+    "$GRAPHITE_THEME/index.theme"
+    "$GRAPHITE_THEME/gtk-3.0/gtk.css"
+    "$GRAPHITE_THEME/gtk-3.0/gtk-dark.css"
+    "$GRAPHITE_THEME/gtk-4.0/gtk.css"
+    "$GRAPHITE_THEME/gtk-4.0/gtk-dark.css"
+)
+for theme_file in "${GRAPHITE_FILES[@]}"; do
+    [[ -s "$theme_file" ]] || fail "generated Graphite theme file is missing: $theme_file"
+done
+for asset_dir in "$GRAPHITE_THEME/gtk-3.0/assets" "$GRAPHITE_THEME/gtk-4.0/assets"; do
+    if [[ ! -d "$asset_dir" || -z "$(find "$asset_dir" -type f -print -quit)" ]]; then
+        fail "generated Graphite assets are missing: $asset_dir"
+    fi
+done
+
+DRACULA_ICONS=/usr/share/icons/dracula-icons-main
+[[ -s "$DRACULA_ICONS/index.theme" ]] \
+    || fail "Dracula icon theme index is missing: $DRACULA_ICONS/index.theme"
+[[ -s "$DRACULA_ICONS/icon-theme.cache" ]] \
+    || fail "Dracula generated icon cache is missing: $DRACULA_ICONS/icon-theme.cache"
+[[ -s /usr/share/licenses/Graphite-gtk-theme/LICENSE ]] \
+    || fail "Graphite upstream license is missing"
+[[ -s /usr/share/licenses/dracula-icons/README.md ]] \
+    || fail "Dracula Icons upstream licensing notice is missing"
+
+for gtk_settings in /etc/skel/.config/gtk-{3,4}.0/settings.ini; do
+    grep -Fxq 'gtk-theme-name=Graphite-purple-Dark-dracula' "$gtk_settings" \
+        || fail "configured GTK theme name is incorrect: $gtk_settings"
+    grep -Fxq 'gtk-icon-theme-name=dracula-icons-main' "$gtk_settings" \
+        || fail "configured icon theme name is incorrect: $gtk_settings"
+done
+THEME_SCHEMA=/usr/share/glib-2.0/schemas/zz_asahi-atomic-niri.gschema.override
+grep -Fxq "gtk-theme='Graphite-purple-Dark-dracula'" "$THEME_SCHEMA" \
+    || fail "GNOME schema override has the wrong GTK theme name"
+grep -Fxq "icon-theme='dracula-icons-main'" "$THEME_SCHEMA" \
+    || fail "GNOME schema override has the wrong icon theme name"
+
 REQUIRED_BINARIES=(
     niri
     niri-session
