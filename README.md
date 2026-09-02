@@ -34,11 +34,14 @@ Ubuntu, Debian, and Arch presets.
 **Flatpak runtime:** flatpak + a system Flathub remote (added at first boot).
 Per-user, first-login installs of **Flatseal**, **Warehouse**, and **Smile**.
 
-**Host-native multimedia (software decode):** ffmpeg-free and the Fedora
-`gstreamer1-plugins-{base,good,bad,ugly}-free` set for H.264/HEVC/VP9/AV1/AAC.
-The Asahi Mesa/kernel/firmware stack is untouched; Asahi's hardware video
-decode (AVD → VA-API) is not yet bundled upstream, so these provide dependable
-software decode.
+**Host-native multimedia (software encode/decode):** RPM Fusion's full FFmpeg,
+including `libx264` and `libx265`, provides H.264 and H.265/HEVC software
+decoding and encoding. `gstreamer1-plugin-libav` and the Fedora
+`gstreamer1-plugins-{base,good,bad,ugly}-free` set expose broad host-native
+playback support, while `ffmpegthumbnailer` supplies video thumbnails. The
+Asahi Mesa/kernel/firmware stack is untouched; Asahi's hardware video decode
+(AVD → VA-API) is not yet bundled upstream, so H.264/H.265 processing remains
+CPU-based.
 
 **Desktop plumbing:** udisks2, gvfs (+ MTP / archive / FUSE backends),
 gnome-disk-utility, CUPS (printing), bluez + blueman (Bluetooth),

@@ -32,7 +32,12 @@ REQUIRED_PACKAGES=(
     file-roller-nautilus
     evince
     eog
-    ffmpeg-free
+    ffmpeg
+    ffmpeg-libs
+    x264-libs
+    x265-libs
+    ffmpegthumbnailer
+    gstreamer1-plugin-libav
     gstreamer1-plugins-base
     gstreamer1-plugins-base-tools
     gstreamer1-plugins-good
@@ -69,6 +74,14 @@ FORBIDDEN_GAMING_PACKAGES=(
     mangohud
 )
 
+# RPM Fusion supplies the software codecs, but its PC GPU driver replacements
+# must never displace Fedora Asahi Remix's Mesa packages.
+FORBIDDEN_FREEWORLD_MESA_PACKAGES=(
+    mesa-va-drivers-freeworld
+    mesa-vdpau-drivers-freeworld
+    mesa-vulkan-drivers-freeworld
+)
+
 # Keep the Asahi hardware stack from the base image.
 REQUIRED_ASAHI_PACKAGES=(
     asahi-platform-metapackage
@@ -98,6 +111,12 @@ done
 for package in "${FORBIDDEN_GAMING_PACKAGES[@]}"; do
     if rpm -q --quiet "$package"; then
         fail "forbidden gaming/x86 package is installed: $package"
+    fi
+done
+
+for package in "${FORBIDDEN_FREEWORLD_MESA_PACKAGES[@]}"; do
+    if rpm -q --quiet "$package"; then
+        fail "RPM Fusion Mesa must not replace the Asahi Mesa stack: $package"
     fi
 done
 
@@ -156,12 +175,27 @@ REQUIRED_BINARIES=(
     gst-inspect-1.0
     ffmpeg
     ffprobe
+    ffmpegthumbnailer
     gzip
     update-m1n1
 )
 
 for binary in "${REQUIRED_BINARIES[@]}"; do
     command -v "$binary" >/dev/null 2>&1 || fail "required command not found: $binary"
+done
+
+# Full FFmpeg is intentional: require both common software decoders and the
+# high-quality GPL encoders so a repository/package change cannot silently
+# reduce the image back to Fedora's codec-limited build.
+for decoder in h264 hevc; do
+    ffmpeg -hide_banner -decoders 2>/dev/null | \
+        awk -v codec="$decoder" '$2 == codec { found = 1 } END { exit !found }' || \
+        fail "FFmpeg decoder is missing: $decoder"
+done
+for encoder in libx264 libx265; do
+    ffmpeg -hide_banner -encoders 2>/dev/null | \
+        awk -v codec="$encoder" '$2 == codec { found = 1 } END { exit !found }' || \
+        fail "FFmpeg encoder is missing: $encoder"
 done
 
 # These Nautilus helpers live outside PATH.

@@ -7,7 +7,8 @@ RUN rm -rf /opt
 COPY files/dnf/*.repo /etc/yum.repos.d/
 
 RUN dnf config-manager addrepo --from-repofile=https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo && \
-    dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+    dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo && \
+    dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm
 
 RUN dnf install -y \
     niri xwayland-satellite greetd tuigreet alacritty \
@@ -41,12 +42,15 @@ RUN dnf install -y \
     bluez blueman \
     power-profiles-daemon \
     file-roller file-roller-nautilus evince eog \
-    # Use Fedora's free software codecs; do not replace Asahi's hardware stack.
-    ffmpeg-free \
+    # RPM Fusion's full FFmpeg supplies H.264/H.265 software decode and
+    # libx264/libx265 encoding. Do not replace Asahi's hardware stack.
+    ffmpeg ffmpeg-libs x264-libs x265-libs ffmpegthumbnailer \
+    gstreamer1-plugin-libav \
     gstreamer1-plugins-base gstreamer1-plugins-base-tools \
     gstreamer1-plugins-good \
     gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free \
-    --exclude="swaylock,waybar,fuzzel" \
+    --allowerasing \
+    --exclude="swaylock,waybar,fuzzel,mesa-*-freeworld" \
     && dnf clean all
 
 # Keep shared themes under /usr so all users get the same read-only files.
