@@ -1,28 +1,17 @@
 #!/usr/bin/bash
 # asahi-atomic-niri m1n1 / U-Boot / device-tree refresh helper.
 #
-# Fedora Asahi Atomic (OSTree/bootc) cannot refresh the Asahi stage-2
-# m1n1 payload (ESP:/m1n1/boot.bin) at package/image-build time, and must not
-# use the stale legacy /boot/dtb symlink (which is a Fedora ARM postinst
-# artifact; `grubby` is excluded from this base image). Instead, the device
-# trees are taken from the *currently booted* deployment's own /usr tree, keyed
-# off the kernel release reported by `uname -r`. Because this helper only runs
-# after a new deployment has booted successfully, resolving the DTB dir through
-# /usr/lib/modules/$(uname -r) is inherently deployment-aware and can never
-# pick an arbitrary/lexicographically-newest directory.
+# Fedora Asahi Atomic (OSTree/bootc) cannot refresh the Asahi stage-2 m1n1
+# payload (ESP:/m1n1/boot.bin) at image-build time, and must not use the stale
+# legacy /boot/dtb symlink (a Fedora ARM postinst artifact; `grubby` is not in
+# this base image). Instead, the device trees come from the booted deployment's
+# own /usr tree, keyed off `uname -r`. Because this helper only runs after a new
+# deployment has booted, /usr/lib/modules/$(uname -r) always holds that
+# deployment's trees - it can never pick an arbitrary or newest directory.
 #
-# Where the DTB path comes from (documented derivation):
-#   kver    := $(uname -r)                       # kernel release of booted deployment
-#   DTBDIR  := /usr/lib/modules/$kver/dtb        # canonical dir, populated by the
-#                                                 #   dracut-asahi kernel-install hook
-#                                                 #   (/usr/lib/kernel/install.d/15-...)
-#   DTBS    := ${DTBDIR}/apple/t6*.dtb ${DTBDIR}/apple/t81*.dtb   # all Apple M-series DTBs
-#
-# update-m1n1 is invoked with ASAHI_ATOMIC_DTBS exported (the deployment-aware
-# DTB directory), so it embeds the booted deployment's DTBs (plus m1n1 +
-# gzipped U-Boot) into boot.bin. The patched update-m1n1 applies this namespaced
-# override after its own config is sourced, so persistent /etc state cannot
-# silently replace the deployment-aware DTBs.
+# update-m1n1 runs with ASAHI_ATOMIC_DTBS exported (the deployment-aware DTB
+# directory); the patched update-m1n1 applies this override after its own config
+# is sourced, so persistent /etc state cannot silently replace the trees.
 #
 # Subcommands:
 #   deployment-id  Print the stable booted-deployment identifier (fail closed).
@@ -45,21 +34,16 @@ failclosed() {
     exit 1
 }
 
-# Stable deployment identifier: the OSTree commit checksum of the booted
-# deployment, taken from the ostree= kernel karg (how OSTree/bootc itself
-# identifies the booted deployment) and normalized to just the commit checksum
-# so it is stable regardless of which /ostree/boot.N/ array the deployment is
-# currently served from. Falls back to `bootc status --json` if the karg is
-# missing. We deliberately do NOT use `uname -r` alone, because two deployments
-# can share a kernel release.
+# Stable identifier for the booted deployment: its OSTree commit checksum.
+# Not `uname -r`, because two deployments can share a kernel release.
 deployment_id() {
     local id="" karg=""
     karg="$(tr ' ' '\n' </proc/cmdline | sed -n 's/^ostree=//p')"
     if [[ -n "$karg" ]]; then
         # karg == /ostree/boot.N/<stateroot>/<checksum>[/serial]
         karg="${karg#/ostree/boot.}"
-        karg="${karg#*/}"        # now: <stateroot>/<checksum>[/serial]
-        id="$(printf '%s' "$karg" | cut -d/ -f2)"   # the commit checksum
+        karg="${karg#*/}"
+        id="$(printf '%s' "$karg" | cut -d/ -f2)"
         if [[ -n "$id" ]]; then
             printf '%s\n' "$id"
             return 0
@@ -195,12 +179,9 @@ cmd_refresh() {
 
     [[ -x "$UPDATE_M1N1" ]] || failclosed "'$UPDATE_M1N1' not found or not executable"
 
-    # Hand the deployment-aware DTB directory to update-m1n1 through a
-    # namespaced override that the patched script applies AFTER Fedora's own
-    # config (/etc/sysconfig/update-m1n1) has been sourced. Plain DTBS is
-    # deliberately unset so a persistent /etc config can never silently win.
-    # (The patched update-m1n1 assigns: [ -n "${ASAHI_ATOMIC_DTBS:-}" ] &&
-    # DTBS="$ASAHI_ATOMIC_DTBS", before the DTBS empty-check/use.)
+    # Hand the deployment-aware DTB directory to update-m1n1 through the
+    # namespaced override the patched script applies AFTER Fedora's own config
+    # is sourced. Plain DTBS is unset so a persistent /etc config can never win.
     unset DTBS || true
     export ASAHI_ATOMIC_DTBS="$dtb"
     log "refreshing m1n1/U-Boot/DTBs from $dtb (deployment $id)"

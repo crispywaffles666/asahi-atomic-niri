@@ -100,7 +100,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         continue
     fi
     if [[ "$done_override" -eq 0 && "$line" == "$DTBS_CHECK_LINE" ]]; then
-        # Prepend the override block immediately before the DTBS empty check.
         printf '%s\n' "$OVERRIDE_BLOCK"
         done_override=1
     fi
