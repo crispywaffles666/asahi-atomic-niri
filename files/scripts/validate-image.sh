@@ -1,8 +1,5 @@
 #!/usr/bin/bash
-# Validate the final image composition. Fails the build if required desktop
-# packages are missing or if forbidden GNOME desktop packages are present.
-# Also verifies that no Asahi hardware packages are missing and that no
-# x86_64-only / gaming packages are present.
+# Check the image's packages, tools, settings, and boot chain.
 set -euxo pipefail
 
 REQUIRED_PACKAGES=(
@@ -17,10 +14,8 @@ REQUIRED_PACKAGES=(
     tailscale
     uupd
     keyd
-    # Containerized dev environments + Flatpak runtime
     distrobox
     flatpak
-    # "Boring desktop plumbing" the minimal base-atomic image does not ship
     udisks2
     gvfs
     gvfs-mtp
@@ -31,14 +26,12 @@ REQUIRED_PACKAGES=(
     bluez
     blueman
     power-profiles-daemon
-    # Standard sensor userspace for the Apple Silicon ALS (diagnostics:
-    # monitor-sensor / D-Bus). asahi-brightnessd reads IIO sysfs directly.
+    # asahi-brightnessd reads sysfs; this package supplies sensor checks.
     iio-sensor-proxy
     file-roller
     file-roller-nautilus
     evince
     eog
-    # Host-native multimedia codecs (software decode)
     ffmpeg-free
     gstreamer1-plugins-base
     gstreamer1-plugins-base-tools
@@ -47,7 +40,7 @@ REQUIRED_PACKAGES=(
     gstreamer1-plugins-ugly-free
 )
 
-# GNOME/KDE desktop packages that must NOT be present (Noctalia + niri replace them)
+# Noctalia and niri replace these desktops.
 FORBIDDEN_PACKAGES=(
     gnome-shell
     mutter
@@ -58,7 +51,7 @@ FORBIDDEN_PACKAGES=(
     sddm
 )
 
-# Bazzite/gaming/x86-specific packages that must NOT leak into this image
+# These PC and gaming packages do not belong in the Arm image.
 FORBIDDEN_GAMING_PACKAGES=(
     steam
     lutris
@@ -76,9 +69,7 @@ FORBIDDEN_GAMING_PACKAGES=(
     mangohud
 )
 
-# Core packages that the Asahi bootable container must retain (brought in by
-# the base-atomic image). Their presence checks guard against accidental
-# removal of the Asahi hardware stack.
+# Keep the Asahi hardware stack from the base image.
 REQUIRED_ASAHI_PACKAGES=(
     asahi-platform-metapackage
     asahi-repos
@@ -116,7 +107,6 @@ for package in "${REQUIRED_ASAHI_PACKAGES[@]}"; do
     fi
 done
 
-# Verify every configured command referenced by Niri/Noctalia/helper scripts exists
 REQUIRED_BINARIES=(
     niri
     niri-session
@@ -174,9 +164,7 @@ for binary in "${REQUIRED_BINARIES[@]}"; do
     command -v "$binary" >/dev/null 2>&1 || fail "required command not found: $binary"
 done
 
-# gvfs backends for Nautilus live in /usr/libexec (not on PATH), so check their
-# absolute paths directly: MTP (phones/tablets), archives (zip mount via
-# gvfs-archive), and removable-media volume monitoring (via udisks2/gvfs).
+# These Nautilus helpers live outside PATH.
 GVFS_DAEMONS=(
     /usr/libexec/gvfsd-mtp
     /usr/libexec/gvfsd-archive
@@ -186,15 +174,11 @@ for d in "${GVFS_DAEMONS[@]}"; do
     [[ -x "$d" ]] || fail "required gvfs daemon not found: $d"
 done
 
-# Homebrew is staged as image-owned content under /usr/share/homebrew and copied
-# into /var/home/linuxbrew at first boot by brew-setup.service.
 if [[ ! -x /usr/share/homebrew/home/linuxbrew/.linuxbrew/bin/brew ]]; then
     fail "staged homebrew binary not found in image"
 fi
 
-# Distrobox assembly manifest: must exist, declare only known-multi-arch
-# (linux/arm64) base images, and must NOT reference any x86-only Universal Blue
-# toolbox / distrobox image (those are for PC/Bazzite, not Apple Silicon).
+# Allow only known Arm images; Universal Blue toolbox images target PCs.
 DISTROBOX_INI=/etc/distrobox/distrobox.ini
 if [[ ! -r $DISTROBOX_INI ]]; then
     fail "distrobox manifest not found: $DISTROBOX_INI"
@@ -202,14 +186,11 @@ fi
 if grep -Eq '^\s*image\s*=\s*(ghcr\.io/ublue-os|docker\.io/ublue|.*toolbox)' "$DISTROBOX_INI"; then
     fail "distrobox manifest must not reference Universal Blue x86 toolbox images"
 fi
-# Sanity: every preset references one of the known arm64 base images.
 for img in 'docker.io/library/fedora' 'docker.io/library/ubuntu' \
            'docker.io/library/debian' 'docker.io/library/archlinux'; do
     grep -q "image=${img}" "$DISTROBOX_INI" || fail "distrobox manifest missing arm64 preset: $img"
 done
 
-# Per-user Flatpak bootstrap: the helper script and user unit must be present so
-# Flatseal / Warehouse / Smile install on first login.
 if [[ ! -x /usr/libexec/asahi-niri/config-flatpaks.sh ]]; then
     fail "per-user flatpak bootstrap script not found / not executable"
 fi
@@ -217,114 +198,90 @@ if [[ ! -f /usr/lib/systemd/user/config-flatpaks.service ]]; then
     fail "per-user flatpak bootstrap unit not found"
 fi
 
-# bootc lint (var-tmpfiles) requires the /var/lib dirs that blueman and
-# power-profiles-daemon bake in to be declared by a tmpfiles.d entry; keep that
-# coverage present so `bootc container lint --fatal-warnings` keeps passing.
+# bootc lint needs a tmpfiles rule for each package-made path in /var.
 if [[ ! -r /usr/lib/tmpfiles.d/zz-asahi-atomic-niri.conf ]]; then
     fail "missing bootc var-tmpfiles coverage: zz-asahi-atomic-niri.conf"
 fi
 
-# ---------------------------------------------------------------------------
-# Niri skel config must parse with the niri version installed in this image
-# ---------------------------------------------------------------------------
-# `niri validate` parses the whole config.hierarchy (config.kdl + includes) and
-# fails closed on removed syntax. This is what the stale pre-25.08 cfg tripped
-# on (kind= animations, matches=[], geometry{...}, renamed bind actions) while
-# old CI only grepped filenames. Runtime niri in the image is new enough.
+# Parse all included files with the niri version in this image.
 NIRI_SKEL=/etc/skel/.config/niri
 if [[ ! -f "$NIRI_SKEL/config.kdl" ]]; then
     fail "skel niri config.kdl missing: $NIRI_SKEL/config.kdl"
 fi
-_validate_home="$(mktemp -d)"
-mkdir -p "$_validate_home/.config"
-cp -r "$NIRI_SKEL" "$_validate_home/.config/niri"
-if ! HOME="$_validate_home" XDG_CONFIG_HOME="$_validate_home/.config" niri validate; then
+test_home="$(mktemp -d)"
+mkdir -p "$test_home/.config"
+cp -r "$NIRI_SKEL" "$test_home/.config/niri"
+if ! HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" niri validate; then
     fail "skel niri config failed niri validate (removed option or broken include?)"
 fi
-rm -rf "$_validate_home"
+rm -rf "$test_home"
 
-# Every $HOME/.local/bin/ helper the skel niri config spawns must actually ship
-# (executable) in the skel, so autostart/keybinds can't point at a script the
-# image does not provide.
-_skel_bin=/etc/skel/.local/bin
-for _ref in $(grep -rhoE '\$HOME/\.local/bin/[A-Za-z0-9._-]+\.sh' "$NIRI_SKEL" | sort -u || true); do
-    _script="${_ref##*/}"
-    if [[ ! -x "$_skel_bin/$_script" ]]; then
-        fail "skel niri config spawns missing helper script: $_script"
+# Each helper named by the starter config must ship with it.
+skel_bin=/etc/skel/.local/bin
+for helper_path in $(grep -rhoE '\$HOME/\.local/bin/[A-Za-z0-9._-]+\.sh' "$NIRI_SKEL" | sort -u || true); do
+    helper="${helper_path##*/}"
+    if [[ ! -x "$skel_bin/$helper" ]]; then
+        fail "skel niri config spawns missing helper script: $helper"
     fi
 done
 
-# keyd remap config ships in the skel so new users get the Mac key layer without
-# any manual setup (keyd reads ~/.config/keyd/default.conf in addition to
-# /etc/keyd/; matches the owner's live dotfiles).
 if [[ ! -r /etc/skel/.config/keyd/default.conf ]]; then
     fail "skel keyd config missing: /etc/skel/.config/keyd/default.conf"
 fi
 
-# nvim config ships in the skel (bootstrap for users who install nvim
-# themselves); it is NOT required to have nvim installed in the image.
+# Ship the starter config without forcing nvim into the image.
 if [[ ! -r /etc/skel/.config/nvim/init.lua ]]; then
     fail "skel nvim config missing: /etc/skel/.config/nvim/init.lua"
 fi
 
-# ---------------------------------------------------------------------------
-# Asahi Atomic boot-chain hardening validation
-# ---------------------------------------------------------------------------
-
-# 1) The stock `update-m1n1` must carry the Atomic-safe gzip invocation and
-#    MUST NOT retain the unfixed one. Exactly one safe invocation expected.
+# OSTree's zero file times require `gzip -n`; reject both drift and double edits.
 UPDATE_M1N1=/usr/bin/update-m1n1
 if [[ ! -f "$UPDATE_M1N1" ]]; then
     fail "patched update-m1n1 not found: $UPDATE_M1N1"
 fi
-_safe_gzip=$(grep -Fxc 'gzip -nc "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
-_bad_gzip=$(grep -Fxc 'gzip -c "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
-if [[ "$_safe_gzip" -ne 1 ]]; then
-    fail "update-m1n1 must contain EXACTLY ONE 'gzip -nc ...' invocation (found $_safe_gzip)"
+safe_gzip=$(grep -Fxc 'gzip -nc "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
+old_gzip=$(grep -Fxc 'gzip -c "$U_BOOT" >>"${TARGET}.new"' "$UPDATE_M1N1" || true)
+if [[ "$safe_gzip" -ne 1 ]]; then
+    fail "update-m1n1 must contain EXACTLY ONE 'gzip -nc ...' invocation (found $safe_gzip)"
 fi
-if [[ "$_bad_gzip" -ne 0 ]]; then
-    fail "update-m1n1 still contains the unfixed 'gzip -c ...' invocation (found $_bad_gzip)"
+if [[ "$old_gzip" -ne 0 ]]; then
+    fail "update-m1n1 still contains the unfixed 'gzip -c ...' invocation (found $old_gzip)"
 fi
 
-# 1b) Namespaced DTB override must be present EXACTLY ONCE and ordered so it is
-#     applied after the stock config is sourced but before DTBS is validated.
-_override_count=$(grep -Fxc 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" || true)
-if [[ "$_override_count" -ne 1 ]]; then
-    fail "update-m1n1 must contain EXACTLY ONE ASAHI_ATOMIC_DTBS override (found $_override_count)"
+# /etc must load first, then the booted tree setting, then the first DTBS check.
+override_count=$(grep -Fxc 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" || true)
+if [[ "$override_count" -ne 1 ]]; then
+    fail "update-m1n1 must contain EXACTLY ONE ASAHI_ATOMIC_DTBS override (found $override_count)"
 fi
 if ! grep -Fxq '    DTBS="$ASAHI_ATOMIC_DTBS"' "$UPDATE_M1N1"; then
     fail "update-m1n1 ASAHI_ATOMIC_DTBS override missing its DTBS assignment line"
 fi
-# The override must appear after the stock config source line ...
-_config_line_n=$(grep -nF '[ -e /etc/sysconfig/update-m1n1 ] && . /etc/sysconfig/update-m1n1' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
-_override_line_n=$(grep -nF 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
-_check_line_n=$(grep -nF 'if [ -z "$DTBS" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
-if [[ -z "$_config_line_n" || -z "$_override_line_n" || -z "$_check_line_n" ]]; then
+config_line=$(grep -nF '[ -e /etc/sysconfig/update-m1n1 ] && . /etc/sysconfig/update-m1n1' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+override_line=$(grep -nF 'if [ -n "${ASAHI_ATOMIC_DTBS:-}" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+check_line=$(grep -nF 'if [ -z "$DTBS" ]; then' "$UPDATE_M1N1" | head -n1 | cut -d: -f1 || true)
+if [[ -z "$config_line" || -z "$override_line" || -z "$check_line" ]]; then
     fail "cannot locate config/override/DTBS-check lines in update-m1n1; ordering unprovable"
 fi
-if [[ "$_config_line_n" -ge "$_override_line_n" ]]; then
+if [[ "$config_line" -ge "$override_line" ]]; then
     fail "update-m1n1 ASAHI_ATOMIC_DTBS override is not applied after config sourcing"
 fi
-if [[ "$_override_line_n" -ge "$_check_line_n" ]]; then
+if [[ "$override_line" -ge "$check_line" ]]; then
     fail "update-m1n1 ASAHI_ATOMIC_DTBS override is not applied before the DTBS empty check"
 fi
 
-# 2) Deployment-aware DTB helper must exist and be executable.
 HELPER=/usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh
 if [[ ! -x "$HELPER" ]]; then
     fail "deployment-aware DTB/m1n1 helper not found or not executable: $HELPER"
 fi
 
-# 3) m1n1 refresh systemd unit exists and is enabled for multi-user.
-UNIT=asahi-atomic-niri-update-m1n1.service
-if [[ ! -f "/usr/lib/systemd/system/$UNIT" ]]; then
-    fail "m1n1 refresh systemd unit missing: $UNIT"
+M1N1_UNIT=asahi-atomic-niri-update-m1n1.service
+if [[ ! -f "/usr/lib/systemd/system/$M1N1_UNIT" ]]; then
+    fail "m1n1 refresh systemd unit missing: $M1N1_UNIT"
 fi
-if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$UNIT" ]]; then
+if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$M1N1_UNIT" ]]; then
     fail "m1n1 refresh unit is not enabled (no multi-user.target.wants symlink)"
 fi
 
-# 3b) keyd remapping daemon unit exists and is enabled for multi-user.
 KEYD_UNIT=keyd.service
 if [[ ! -f "/usr/lib/systemd/system/$KEYD_UNIT" ]]; then
     fail "keyd systemd unit missing: $KEYD_UNIT"
@@ -333,53 +290,43 @@ if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$KEYD_UNIT" ]]; then
     fail "keyd unit is not enabled (no multi-user.target.wants symlink)"
 fi
 
-# 3c) Ambient-light auto-brightness daemon (asahi-brightnessd).
 BRIGHTNESSD=/usr/sbin/asahi-brightnessd
 if [[ ! -x "$BRIGHTNESSD" ]]; then
     fail "asahi-brightnessd binary missing or not executable: $BRIGHTNESSD"
 fi
 BRIGHTNESSD_UNIT=asahi-brightnessd.service
-UNIT_FILE="/usr/lib/systemd/system/$BRIGHTNESSD_UNIT"
-if [[ ! -f "$UNIT_FILE" ]]; then
+BRIGHTNESSD_UNIT_FILE="/usr/lib/systemd/system/$BRIGHTNESSD_UNIT"
+if [[ ! -f "$BRIGHTNESSD_UNIT_FILE" ]]; then
     fail "asahi-brightnessd systemd unit missing: $BRIGHTNESSD_UNIT"
 fi
 if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$BRIGHTNESSD_UNIT" ]]; then
     fail "asahi-brightnessd unit is not enabled (no multi-user.target.wants symlink)"
 fi
-# The unit must reference a real, executable binary.
-_execstart=$(grep -E '^ExecStart=' "$UNIT_FILE" | head -n1)
-if [[ -z "$_execstart" ]]; then
+start_cmd=$(grep -E '^ExecStart=' "$BRIGHTNESSD_UNIT_FILE" | head -n1)
+if [[ -z "$start_cmd" ]]; then
     fail "asahi-brightnessd unit has no ExecStart"
 fi
-_execstart_bin=${_execstart#ExecStart=}
-_execstart_bin=${_execstart_bin%% *}
-if [[ ! -x "$_execstart_bin" ]]; then
-    fail "asahi-brightnessd unit ExecStart binary not found/executable: $_execstart_bin"
+start_bin=${start_cmd#ExecStart=}
+start_bin=${start_bin%% *}
+if [[ ! -x "$start_bin" ]]; then
+    fail "asahi-brightnessd unit ExecStart binary not found/executable: $start_bin"
 fi
-# The unit must skip cleanly on hardware without the keyboard backlight
-# rather than crash-looping. (This image builds a kbd-only asahi-brightnessd;
-# the display backlight is left manual.)
-grep -Eq '^ConditionPathExists=/sys/class/leds/kbd_backlight/max_brightness' "$UNIT_FILE" \
+# Skip hosts without a keyboard light instead of looping on failure.
+grep -Eq '^ConditionPathExists=/sys/class/leds/kbd_backlight/max_brightness' "$BRIGHTNESSD_UNIT_FILE" \
     || fail "asahi-brightnessd unit is missing the kbd-backlight ConditionPathExists"
-# Non-hardware smoke test: upstream has no --help/offline mode, so the only
-# build-safe check is that the daemon FAILS CLEANLY (non-zero exit, no hang)
-# when the kbd backlight is absent — which is the container-build case.
-# Never run this if a real kbd_backlight exists: a build host with live
-# Asahi hardware must not have its brightness written by the test.
+# Upstream has no dry run. On build hosts with no light, it must fail without
+# hanging. Never run it on a host where it could change the light.
 if [[ ! -e /sys/class/leds/kbd_backlight ]]; then
     set +e
     timeout 10 "$BRIGHTNESSD" >/dev/null 2>&1
-    _brightnessd_rc=$?
+    brightnessd_status=$?
     set -e
-    if [[ "$_brightnessd_rc" -eq 0 || "$_brightnessd_rc" -eq 124 ]]; then
-        fail "asahi-brightnessd did not fail cleanly without hardware (exit $_brightnessd_rc)"
+    if [[ "$brightnessd_status" -eq 0 || "$brightnessd_status" -eq 124 ]]; then
+        fail "asahi-brightnessd did not fail cleanly without hardware (exit $brightnessd_status)"
     fi
 fi
 
-# 4) The helper must NOT use unsafe glob-first / latest-directory selection.
-#    It must resolve DTBs from the booted deployment's own /usr tree (keyed off
-#    the booted kernel release), never by scanning /boot/ostree/* or picking the
-#    lexicographically-newest directory.
+# The helper must use the booted tree, not guess from sorted /boot paths.
 if grep -Eq '/boot/ostree|sort -r|sort -V|tail -n 1|head -n 1|ls .*\|.*(head|tail|sort)' "$HELPER"; then
     fail "m1n1 helper appears to use unsafe glob-first/latest-directory logic"
 fi
@@ -389,14 +336,11 @@ fi
 if ! grep -Eq '/dtb|/dtbs' "$HELPER"; then
     fail "m1n1 helper does not resolve a device-tree directory under the deployment module root"
 fi
-# The module root must resolve to the standard /usr/lib/modules location by
-# default (that is where dracut-asahi installs each deployment's DTBs).
+# dracut-asahi puts each tree's device files here.
 if ! grep -q '/usr/lib/modules' "$HELPER"; then
     fail "m1n1 helper does not reference the standard /usr/lib/modules deployment tree"
 fi
-# The helper must hand off through the namespaced ASAHI_ATOMIC_DTBS override and
-# must NOT rely on exporting plain DTBS (a persistent /etc config could silently
-# clobber an exported plain DTBS).
+# Plain DTBS loses to /etc; the patched name loads after /etc.
 if ! grep -q 'export ASAHI_ATOMIC_DTBS=' "$HELPER"; then
     fail "m1n1 helper does not export the ASAHI_ATOMIC_DTBS namespaced override"
 fi
@@ -405,132 +349,106 @@ if grep -Eq '^[[:space:]]*export[[:space:]]+DTBS=' "$HELPER" \
     fail "m1n1 helper still exports the plain DTBS variable (must use ASAHI_ATOMIC_DTBS)"
 fi
 
-# 5) Container signature public key must be present.
 SIG_KEY=/etc/pki/containers/ghcr.io-crispywaffles666-asahi-atomic-niri.pub
 if [[ ! -s "$SIG_KEY" ]]; then
     fail "container signature public key missing: $SIG_KEY"
 fi
 
-# 6) Registries sigstore config must exist and enable sigstore attachments for
-#    this exact GHCR namespace.
-REGCFG=/etc/containers/registries.d/ghcr.io-crispywaffles666-asahi-atomic-niri.yaml
-if [[ ! -r "$REGCFG" ]]; then
-    fail "registries sigstore config missing: $REGCFG"
+SIGSTORE_CONFIG=/etc/containers/registries.d/ghcr.io-crispywaffles666-asahi-atomic-niri.yaml
+if [[ ! -r "$SIGSTORE_CONFIG" ]]; then
+    fail "registries sigstore config missing: $SIGSTORE_CONFIG"
 fi
-grep -q 'use-sigstore-attachments: true' "$REGCFG" \
+grep -q 'use-sigstore-attachments: true' "$SIGSTORE_CONFIG" \
     || fail "registries config missing use-sigstore-attachments"
-grep -q 'ghcr.io/crispywaffles666/asahi-atomic-niri' "$REGCFG" \
+grep -q 'ghcr.io/crispywaffles666/asahi-atomic-niri' "$SIGSTORE_CONFIG" \
     || fail "registries config missing GHCR namespace"
 
-# 7) Container policy must contain the expected GHCR namespace and be JSON.
-POLICY=/etc/containers/policy.json
-if [[ ! -r "$POLICY" ]]; then
-    fail "container policy missing: $POLICY"
+POLICY_FILE=/etc/containers/policy.json
+if [[ ! -r "$POLICY_FILE" ]]; then
+    fail "container policy missing: $POLICY_FILE"
 fi
 if command -v python3 >/dev/null 2>&1; then
-    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$POLICY" 2>/dev/null; then
-        fail "container policy is not valid JSON: $POLICY"
+    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$POLICY_FILE" 2>/dev/null; then
+        fail "container policy is not valid JSON: $POLICY_FILE"
     fi
 fi
-grep -q '"ghcr.io/crispywaffles666/asahi-atomic-niri"' "$POLICY" \
+grep -q '"ghcr.io/crispywaffles666/asahi-atomic-niri"' "$POLICY_FILE" \
     || fail "container policy missing GHCR namespace"
-grep -q '"type": "sigstoreSigned"' "$POLICY" \
+grep -q '"type": "sigstoreSigned"' "$POLICY_FILE" \
     || fail "container policy missing sigstoreSigned rule"
 
-# 8) Update configuration must never auto-reboot: the only auto-update timer is
-#    uupd (stage-only), and the bootc/rpm-ostree auto-apply timers are masked.
+# Only uupd may fetch OS updates, and it must not reboot.
 if [[ ! -r /etc/uupd/config.json ]]; then
     fail "uupd config missing: /etc/uupd/config.json"
 fi
-for _t in bootc-fetch-apply-updates.timer rpm-ostreed-automatic.timer; do
-    if [[ ! -L "/etc/systemd/system/$_t" ]] || [[ "$(readlink "/etc/systemd/system/$_t")" != "/dev/null" ]]; then
-        fail "auto-reboot-capable update timer is not masked: $_t"
+for timer in bootc-fetch-apply-updates.timer rpm-ostreed-automatic.timer; do
+    if [[ ! -L "/etc/systemd/system/$timer" ]] || [[ "$(readlink "/etc/systemd/system/$timer")" != "/dev/null" ]]; then
+        fail "auto-reboot-capable update timer is not masked: $timer"
     fi
 done
 
-# 8b) The inherited Fedora grub-boot-success.timer user unit must be globally
-#     masked: bootc mounts /boot read-only, so grub2-set-bootflag can never
-#     write GRUB's boot_success flag and the service would fail on every login.
-_grub_mask=/etc/systemd/user/grub-boot-success.timer
-if [[ ! -L "$_grub_mask" ]] || [[ "$(readlink "$_grub_mask")" != "/dev/null" ]]; then
+# bootc makes /boot read-only, so this Fedora timer can only fail.
+grub_mask=/etc/systemd/user/grub-boot-success.timer
+if [[ ! -L "$grub_mask" ]] || [[ "$(readlink "$grub_mask")" != "/dev/null" ]]; then
     fail "grub-boot-success.timer user unit is not globally masked"
 fi
 
-# 9) Non-destructive, build-time-safe proof that the patched `gzip -nc` works
-#    against the installed U-Boot without writing the ESP.
+# Test the installed U-Boot without writing to the ESP.
 if ! "$HELPER" gzip-check; then
     fail "gzip -nc self-test against installed U-Boot failed"
 fi
 
-# 10) Behavioral conflict test: a stock/default config setting a stale `DTBS`
-#     must NOT override the deployment-aware ASAHI_ATOMIC_DTBS value.
-#
-#     Approach: copy the patched /usr/bin/update-m1n1 and redirect only its
-#     hardcoded config-source path and throwaway m1n1config to temp files, so the
-#     real config-sourcing -> override-application ordering is exercised verbatim
-#     while the ESP is never mounted/written. We then set a DELIBERATELY WRONG
-#     DTBS in the fake config, provide the correct deployment DTB dir through
-#     ASAHI_ATOMIC_DTBS, point TARGET at a temp payload, and assert the payload
-#     contains the correct DTBs and not the stale config path.
-_ov_test_root="$(mktemp -d)"
-_ov_cleanup() { rm -rf "${_ov_test_root:-}"; }
-trap _ov_cleanup EXIT
-mkdir -p "$_ov_test_root/apple"
+# Run the patched script with a false /etc setting and a true booted-tree setting.
+# Temp paths keep the test from touching the ESP.
+test_root="$(mktemp -d)"
+clean_test() { rm -rf "${test_root:-}"; }
+trap clean_test EXIT
+mkdir -p "$test_root/apple"
 
-# A copy of the real, already-patched script.
-_ov_script="$_ov_test_root/update-m1n1"
-cp "$UPDATE_M1N1" "$_ov_script"
-chmod +x "$_ov_script"
+test_script="$test_root/update-m1n1"
+cp "$UPDATE_M1N1" "$test_script"
+chmod +x "$test_script"
 
-# Redirect the stock config-source line so the copy sources OUR temp fake default
-# (with the deliberately wrong DTBS) instead of the real /etc, and redirect the
-# throwaway per-run m1n1 config so nothing touches /run or the ESP. Only these
-# two I/O paths are redirected; the config-sourcing -> override -> DTBS-check
-# ordering and the override application run verbatim.
+# Change only the two write paths; keep the setting order under test intact.
 sed -i \
-    -e "s|^\[ -e /etc/sysconfig/update-m1n1 \] \&\& \. /etc/sysconfig/update-m1n1\$|[ -e \"\$_ov_fake_default\" ] \&\& . \"\$_ov_fake_default\"|" \
+    -e "s|^\[ -e /etc/sysconfig/update-m1n1 \] \&\& \. /etc/sysconfig/update-m1n1\$|[ -e \"\$test_default\" ] \&\& . \"\$test_default\"|" \
     -e 's|^m1n1config=/run/m1n1\.conf$|m1n1config="$ASAHI_ATOMIC_TMP"/m1n1.conf|' \
-    "$_ov_script"
+    "$test_script"
 
-# Fake functions.sh next to the copy (update-m1n1 sources $(dirname $0)/functions.sh)
-cat > "$_ov_test_root/functions.sh" <<'EOF'
+# The copied script loads functions.sh from its own folder.
+cat > "$test_root/functions.sh" <<'EOF'
 #!/bin/sh
 warn()  { echo "WARN: $*" >&2; }
 info()  { echo "INFO: $*" >&2; }
 mount_sys_esp() { mkdir -p "$1"; }
 EOF
 
-# 1) Fake default config sets a deliberately WRONG, stale DTBS.
-printf 'DTBS=/definitely/wrong/stale-dtb\n' > "$_ov_test_root/fake-default"
-# 2) Correct deployment-aware DTB dir (as the helper would resolve).
-printf 'CORRECT-DEPLOYMENT-DTB\n'   > "$_ov_test_root/apple/t6MARKER.dtb"
-printf 'CORRECT-DEPLOYMENT-DTB2\n'  > "$_ov_test_root/apple/t81MARKER.dtb"
+# The false value must lose to ASAHI_ATOMIC_DTBS below.
+printf 'DTBS=/definitely/wrong/stale-dtb\n' > "$test_root/fake-default"
+printf 'CORRECT-DEPLOYMENT-DTB\n'   > "$test_root/apple/t6MARKER.dtb"
+printf 'CORRECT-DEPLOYMENT-DTB2\n'  > "$test_root/apple/t81MARKER.dtb"
 
-# 3) Minimal m1n1 / U-Boot source payloads for the copy.
-printf 'M1N1PAYLOAD\n'  > "$_ov_test_root/m1n1.bin"
-printf 'UBOOTNODTB\n'   > "$_ov_test_root/u-boot-nodtb.bin"
+printf 'M1N1PAYLOAD\n'  > "$test_root/m1n1.bin"
+printf 'UBOOTNODTB\n'   > "$test_root/u-boot-nodtb.bin"
 
-# 4) Invoke the copied, patched logic with the conflicting config and the
-#    deployment override.
-_ov_out="$_ov_test_root/boot.bin"
-if ! ( cd "$_ov_test_root" && \
-       ASAHI_ATOMIC_TMP="$_ov_test_root" \
-       _ov_fake_default="$_ov_test_root/fake-default" \
-       M1N1="$_ov_test_root/m1n1.bin" \
-       U_BOOT="$_ov_test_root/u-boot-nodtb.bin" \
-       TARGET="$_ov_out" \
-       ASAHI_ATOMIC_DTBS="$_ov_test_root" \
-       sh "$_ov_script" >/dev/null 2>&1 ); then
+test_out="$test_root/boot.bin"
+if ! ( cd "$test_root" && \
+       ASAHI_ATOMIC_TMP="$test_root" \
+       test_default="$test_root/fake-default" \
+       M1N1="$test_root/m1n1.bin" \
+       U_BOOT="$test_root/u-boot-nodtb.bin" \
+       TARGET="$test_out" \
+       ASAHI_ATOMIC_DTBS="$test_root" \
+       sh "$test_script" >/dev/null 2>&1 ); then
     fail "patched update-m1n1 conflicting-config behavioral run failed"
 fi
-# 5) The effective DTBS must be the deployment dir (payload contains its DTBs).
-if ! grep -q 'CORRECT-DEPLOYMENT-DTB' "$_ov_out"; then
+if ! grep -q 'CORRECT-DEPLOYMENT-DTB' "$test_out"; then
     fail "ASAHI_ATOMIC_DTBS override lost: payload does not contain deployment DTB"
 fi
-if grep -Eq 'definitely/wrong|/stale-dtb' "$_ov_out"; then
+if grep -Eq 'definitely/wrong|/stale-dtb' "$test_out"; then
     fail "stale config DTBS won: payload contains wrong/stale DTB path"
 fi
 trap - EXIT
-_ov_cleanup
+clean_test
 
 echo "Image validation passed."

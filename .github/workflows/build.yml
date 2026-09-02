@@ -20,8 +20,7 @@ env:
 jobs:
   build:
     name: Build aarch64 bootc image
-    # Native arm64 runner avoids qemu-user emulation pitfalls with
-    # post-install/kernel-install scripts during the bootc build.
+    # Package hooks fail under qemu-user, so build on Arm.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read

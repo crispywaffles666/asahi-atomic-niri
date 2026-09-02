@@ -1,46 +1,27 @@
 #!/usr/bin/bash
-# asahi-atomic-niri m1n1 / U-Boot / device-tree refresh helper.
-#
-# Fedora Asahi Atomic (OSTree/bootc) cannot refresh the Asahi stage-2 m1n1
-# payload (ESP:/m1n1/boot.bin) at image-build time, and must not use the stale
-# legacy /boot/dtb symlink (a Fedora ARM postinst artifact; `grubby` is not in
-# this base image). Instead, the device trees come from the booted deployment's
-# own /usr tree, keyed off `uname -r`. Because this helper only runs after a new
-# deployment has booted, /usr/lib/modules/$(uname -r) always holds that
-# deployment's trees - it can never pick an arbitrary or newest directory.
-#
-# update-m1n1 runs with ASAHI_ATOMIC_DTBS exported (the deployment-aware DTB
-# directory); the patched update-m1n1 applies this override after its own config
-# is sourced, so persistent /etc state cannot silently replace the trees.
-#
-# Subcommands:
-#   deployment-id  Print the stable booted-deployment identifier (fail closed).
-#   resolve-dtb    Print the resolved deployment DTB directory (fail closed).
-#   gzip-check     Non-destructive: prove `gzip -nc` works vs the installed
-#                  U-Boot without writing the ESP (safe at build time too).
-#   check          Non-destructive deployment check (gzip + DTB + status).
-#   refresh        Deployment-aware refresh: run update-m1n1, then record success.
+# Use the booted tree's device files, never the stale /boot/dtb link. Running
+# after boot ties `uname -r` to that tree. ASAHI_ATOMIC_DTBS then wins over old
+# settings in /etc without letting them pick another tree.
 set -euo pipefail
 
-# Overridable via env for non-root verification/testing.
+# Tests can point these paths at temp files.
 MARKER_ROOT=${MARKER_ROOT:-/var/lib/asahi-atomic-niri}
 MODULE_ROOT=${MODULE_ROOT:-/usr/lib/modules}
 UPDATE_M1N1=${UPDATE_M1N1:-/usr/bin/update-m1n1}
 
 log() { echo "asahi-atomic-niri-update-m1n1: $*" >&2; }
 
-failclosed() {
+fail() {
     echo "ERROR: $*" >&2
     exit 1
 }
 
-# Stable identifier for the booted deployment: its OSTree commit checksum.
-# Not `uname -r`, because two deployments can share a kernel release.
+# Use the tree hash as its ID; two trees may share a kernel release.
 deployment_id() {
     local id="" karg=""
     karg="$(tr ' ' '\n' </proc/cmdline | sed -n 's/^ostree=//p')"
     if [[ -n "$karg" ]]; then
-        # karg == /ostree/boot.N/<stateroot>/<checksum>[/serial]
+        # Path shape: /ostree/boot.N/<stateroot>/<checksum>[/serial]
         karg="${karg#/ostree/boot.}"
         karg="${karg#*/}"
         id="$(printf '%s' "$karg" | cut -d/ -f2)"
@@ -51,7 +32,6 @@ deployment_id() {
     fi
 
     if command -v bootc >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-        # bootc status JSON: 'booted' object with 'checksum'
         id="$(bootc status --json 2>/dev/null \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); b=d.get("booted") or {}; print(b.get("checksum",""))' \
         )"
@@ -61,38 +41,34 @@ deployment_id() {
         fi
     fi
 
-    failclosed "unable to determine the booted deployment identifier"
+    fail "unable to determine the booted deployment identifier"
 }
 
-# Resolve the DTB directory for the currently booted deployment. Fails closed
-# (never guesses) if the deployment's own DTB set cannot be found.
-resolve_dtb() {
-    local kver="" cand=""
+find_dtbs() {
+    local kver="" path=""
     kver="$(uname -r)"
     if [[ -z "$kver" ]]; then
-        failclosed "uname -r returned an empty kernel release"
+        fail "uname -r returned an empty kernel release"
     fi
 
-    # Canonical location populated by the dracut-asahi kernel-install hook.
-    cand="${MODULE_ROOT}/${kver}/dtb"
-    if [[ -d "$cand" ]] && [[ -n "$(ls "$cand"/apple/t6*.dtb "$cand"/apple/t81*.dtb 2>/dev/null)" ]]; then
-        printf '%s\n' "$cand"
+    # dracut-asahi uses dtb, but some Asahi packages use dtbs.
+    path="${MODULE_ROOT}/${kver}/dtb"
+    if [[ -d "$path" ]] && [[ -n "$(ls "$path"/apple/t6*.dtb "$path"/apple/t81*.dtb 2>/dev/null)" ]]; then
+        printf '%s\n' "$path"
         return 0
     fi
 
-    # Secondary name used by some Asahi packaging (dtbs/, plural).
-    cand="${MODULE_ROOT}/${kver}/dtbs"
-    if [[ -d "$cand" ]] && [[ -n "$(ls "$cand"/apple/t6*.dtb "$cand"/apple/t81*.dtb 2>/dev/null)" ]]; then
-        printf '%s\n' "$cand"
+    path="${MODULE_ROOT}/${kver}/dtbs"
+    if [[ -d "$path" ]] && [[ -n "$(ls "$path"/apple/t6*.dtb "$path"/apple/t81*.dtb 2>/dev/null)" ]]; then
+        printf '%s\n' "$path"
         return 0
     fi
 
-    failclosed "cannot resolve a DTB directory for the booted deployment kernel '$kver' (looked under /usr/lib/modules, which is already deployment-specific)"
+    fail "cannot find DTBs for the booted kernel '$kver' under /usr/lib/modules"
 }
 
 marker_for() {
-    # $1 = deployment id. Marker paths are anchored under /var (shared and
-    # persistent across deployments on OSTree), keyed by deployment id.
+    # /var spans OSTree trees, so key each mark by tree ID.
     printf '%s/updates/%s\n' "$MARKER_ROOT" "$(printf '%s' "$1" | tr '/' '_')"
 }
 
@@ -105,19 +81,16 @@ is_done() {
 record_done() {
     local marker
     marker="$(marker_for "$1")"
-    mkdir -p "$(dirname "$marker")" || failclosed "cannot create marker dir for deployment"
+    mkdir -p "$(dirname "$marker")" || fail "cannot create marker dir for deployment"
     printf 'refreshed at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$marker"
     log "recorded m1n1 refresh success for deployment $1"
 }
 
-# Non-destructive proof that `gzip -nc` works against the installed U-Boot
-# binary without writing the ESP. Uses a temp file only.
-verify_gzip_nc() {
-    [[ -x "$UPDATE_M1N1" ]] || failclosed "'$UPDATE_M1N1' not found or not executable"
+check_gzip() {
+    [[ -x "$UPDATE_M1N1" ]] || fail "'$UPDATE_M1N1' not found or not executable"
 
     local uboot=""
-    # Resolve the U-Boot payload the same way update-m1n1 does. Allow override
-    # (e.g. for non-root verification / testing against a copied binary).
+    # Tests may point this at a copied U-Boot file.
     if [[ -n "${ASAHI_UBOOT:-}" && -f "$ASAHI_UBOOT" ]]; then
         uboot="$ASAHI_UBOOT"
     elif [[ -f /usr/share/uboot/apple_m1/u-boot-nodtb.bin ]]; then
@@ -125,28 +98,27 @@ verify_gzip_nc() {
     elif [[ -f /usr/lib/asahi-boot/u-boot-nodtb.bin ]]; then
         uboot=/usr/lib/asahi-boot/u-boot-nodtb.bin
     else
-        failclosed "cannot locate the Asahi U-Boot binary for the gzip -nc test"
+        fail "cannot locate the Asahi U-Boot binary for the gzip -nc test"
     fi
 
     local tmp=""
     tmp="$(mktemp)"
-    # Guarded trap: `|:-` avoids `set -u` aborting on the (now unset) local.
+    # The default keeps `set -u` from failing after this local goes out of scope.
     trap '[[ -n "${tmp:-}" ]] && rm -f "$tmp"' RETURN
-    # -nc emits no filename/timestamp header; epoch-zero mtime would otherwise
-    # make gzip -c abort with "file timestamp out of range for gzip format".
+    # -n drops the timestamp that OSTree sets to zero and gzip rejects.
     if ! gzip -nc "$uboot" >"$tmp"; then
-        failclosed "gzip -nc failed against '$uboot' (would also abort update-m1n1)"
+        fail "gzip -nc failed against '$uboot' (would also abort update-m1n1)"
     fi
     if ! gzip -t "$tmp" 2>/dev/null; then
-        failclosed "gzip -nc output failed integrity check"
+        fail "gzip -nc output failed integrity check"
     fi
     log "gzip -nc validated against '$uboot' (decompresses cleanly; no ESP write)"
 }
 
-cmd_check() {
-    verify_gzip_nc
+check() {
+    check_gzip
     local dtb id
-    dtb="$(resolve_dtb)"
+    dtb="$(find_dtbs)"
     id="$(deployment_id)"
     log "resolved deployment DTB dir: $dtb"
     log "booted deployment id:         $id"
@@ -157,16 +129,13 @@ cmd_check() {
     fi
 }
 
-# Non-destructive build/runtime-safe proof that the patched update-m1n1 gzip
-# invocation is actually safe against the installed U-Boot. Writes only a temp
-# file (never the ESP), so it is safe to run during the image build.
-cmd_gzip_check() {
-    verify_gzip_nc
+gzip_check() {
+    check_gzip
 }
 
-cmd_refresh() {
+refresh() {
     local dtb id
-    dtb="$(resolve_dtb)"
+    dtb="$(find_dtbs)"
     id="$(deployment_id)"
 
     if is_done "$id"; then
@@ -174,20 +143,17 @@ cmd_refresh() {
         return 0
     fi
 
-    # Sanity before touching the ESP.
-    verify_gzip_nc
+    # Stop before touching the ESP if gzip cannot read this U-Boot file.
+    check_gzip
 
-    [[ -x "$UPDATE_M1N1" ]] || failclosed "'$UPDATE_M1N1' not found or not executable"
+    [[ -x "$UPDATE_M1N1" ]] || fail "'$UPDATE_M1N1' not found or not executable"
 
-    # Hand the deployment-aware DTB directory to update-m1n1 through the
-    # namespaced override the patched script applies AFTER Fedora's own config
-    # is sourced. Plain DTBS is unset so a persistent /etc config can never win.
+    # The patched script reads this after /etc. Drop plain DTBS so /etc cannot win.
     unset DTBS || true
     export ASAHI_ATOMIC_DTBS="$dtb"
     log "refreshing m1n1/U-Boot/DTBs from $dtb (deployment $id)"
     if ! "$UPDATE_M1N1"; then
-        # Fail closed: do NOT mark this deployment done.
-        failclosed "update-m1n1 failed for deployment $id; not marking as refreshed"
+        fail "update-m1n1 failed for deployment $id; not marking as refreshed"
     fi
 
     record_done "$id"
@@ -196,10 +162,10 @@ cmd_refresh() {
 
 case "${1:-}" in
     deployment-id) deployment_id ;;
-    resolve-dtb)   resolve_dtb ;;
-    gzip-check)    cmd_gzip_check ;;
-    check)         cmd_check ;;
-    refresh)       cmd_refresh ;;
+    resolve-dtb)   find_dtbs ;;
+    gzip-check)    gzip_check ;;
+    check)         check ;;
+    refresh)       refresh ;;
     *)
         echo "usage: $0 {deployment-id|resolve-dtb|gzip-check|check|refresh}" >&2
         exit 2

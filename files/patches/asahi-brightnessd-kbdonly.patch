@@ -1,16 +1,15 @@
 --- a/asahi-brightnessd.c
 +++ b/asahi-brightnessd.c
-@@ -2,13 +2,16 @@
+@@ -2,13 +2,15 @@
   * asahi-brightnessd — ambient-light auto-brightness for Apple Silicon Macs
   * running Asahi Linux.
   *
 - * Reads lux from the aop-sensors-als IIO device and drives both
 - * /sys/class/backlight/apple-panel-bl and /sys/class/leds/kbd_backlight.
-+ * Reads lux from the aop-sensors-als IIO device and drives the keyboard
-+ * backlight (/sys/class/leds/kbd_backlight). The display backlight is left
-+ * fully manual: asahi-brightnessd in its stock form drives the panel too, but
-+ * the asahi-atomic-niri image intentionally drops that channel so Noctalia
-+ * never pops a brightness OSD from ambient-light adjustments.
++ * Reads lux from aop-sensors-als and changes only the keyboard light.
++ * Upstream changes the screen too, which makes Noctalia show an OSD for
++ * each light shift. This image drops that path and leaves screen brightness
++ * to the user. It needs no screen OSD hook or power check.
   *
   * External writes (e.g. brightnessctl invoked by the compositor's
   * XF86MonBrightnessUp/Down bindings) are detected by comparing the observed
@@ -20,7 +19,7 @@
   *
   * Curve constants are adapted from juicecultus/asahi-auto-brightness (MIT).
   */
-@@ -38,9 +41,7 @@
+@@ -38,9 +40,7 @@
  #define IIO_BASE    "/sys/bus/iio/devices"
  #define ALS_NAME    "aop-sensors-als"
  #define ALS_ATTR    "in_illuminance_input"
@@ -30,7 +29,7 @@
  #define DRM_BASE    "/sys/class/drm"
  #define DPMS_ATTR   "dpms"
  #define EDP_PREFIX  "eDP-"
-@@ -56,47 +57,17 @@
+@@ -56,47 +56,17 @@
  #define LUX_RESUME_PCT     75       /* % delta to resume after override */
  #define LUX_RESUME_ABS     5        /* absolute lux delta floor         */
  
@@ -81,7 +80,7 @@
      {1000,   0},
  };
  #define KBD_CURVE_LEN (sizeof(KBD_CURVE)/sizeof(KBD_CURVE[0]))
-@@ -107,10 +78,8 @@
+@@ -107,10 +77,8 @@
  static volatile sig_atomic_t g_terminate = 0;
  
  static char als_path[PATH_MAX];
@@ -92,7 +91,7 @@
  static int  kbd_max;
  
  typedef struct {
-@@ -119,15 +88,7 @@
+@@ -119,15 +87,7 @@
      int  override_baseline_lux;
  } channel_state;
  
@@ -109,7 +108,7 @@
  
  /* ------------------------------------------------------------------ */
  /* Signals                                                            */
-@@ -235,92 +196,6 @@
+@@ -235,92 +195,6 @@
  }
  
  /* ------------------------------------------------------------------ */
@@ -202,7 +201,7 @@
  /* Curve evaluation                                                   */
  /* ------------------------------------------------------------------ */
  static int interpolate(const curve_point *curve, size_t n, int lux) {
-@@ -342,14 +217,6 @@
+@@ -342,14 +216,6 @@
      return pct * max_units / 100;
  }
  
@@ -217,7 +216,7 @@
  /* Exponential smoothing: move alpha (= 1/2^SMOOTH_SHIFT) of the remaining
   * gap toward target each tick. Large deltas move quickly; small deltas
   * fall below the perceptual threshold automatically. The fallback ±1 step
-@@ -374,14 +241,10 @@
+@@ -374,14 +240,10 @@
      return (delta * 100 / baseline) >= LUX_RESUME_PCT;
  }
  
@@ -225,7 +224,7 @@
 - * When `announce_to_noctalia` is true, fire a brightness-suppress IPC
 - * immediately before each sysfs write so Noctalia's OSD stays quiet for
 - * ALS-driven adjustments. */
-+/* Update one channel: detect override, compute target, step. */
++/* Keep manual changes in charge until the room light shifts. */
  static void tick_channel(channel_state *st, const char *path,
                           const curve_point *curve, size_t curve_len,
 -                         int max_units, int floor_pct, int boost_pct, int lux,
@@ -234,7 +233,7 @@
  {
      int observed = read_int(path);
      if (observed < 0) return;
-@@ -399,14 +262,11 @@
+@@ -399,14 +261,11 @@
          return;
      }
  
@@ -250,7 +249,7 @@
          if (write_int(path, next) == 0) {
              int readback = read_int(path);
              st->last_written = readback >= 0 ? readback : next;
-@@ -420,17 +280,14 @@
+@@ -420,17 +279,14 @@
  /* Main loop                                                          */
  /* ------------------------------------------------------------------ */
  static int run(void) {
@@ -273,14 +272,14 @@
          return 1;
      }
      if (locate_als(als_path, sizeof(als_path)) != 0) {
-@@ -438,42 +295,33 @@
+@@ -438,42 +294,33 @@
                  "(no iio:device* with name=%s)\n", ALS_NAME);
          return 1;
      }
 -    /* DPMS lookup is best-effort. Without it the daemon still drives
 -     * both channels from lux; it just won't zero kbd when the panel
-+    /* DPMS lookup is best-effort. Without it the daemon still drives the
-+     * kbd backlight from lux; it just won't zero kbd when the panel
++    /* A missing DPMS path must not block light control. It only keeps us
++     * from turning off the keyboard light when the screen
       * blanks. */
      (void)locate_edp_dpms(dpms_path, sizeof(dpms_path));
      fprintf(stderr,
@@ -302,10 +301,10 @@
 -                 * for when DPMS resumes. Clearing override_active means
 -                 * a manual kbd setting from before idle doesn't fight
 -                 * the forced zero on the way down. */
-+                /* Panel is blanked. Force kbd off and clear override state —
-+                 * writes while the panel is dark are pointless, and clearing
-+                 * override_active means a manual kbd setting from before idle
-+                 * doesn't fight the forced zero on the way down. */
++                /* Turn off the keyboard light with the screen. Clear the old
++                 * manual choice so it cannot fight that forced zero after
++                 * idle. The next room-light shift may then choose a new
++                 * level without restoring the old choice. */
                  int observed = read_int(kbd_path);
                  if (observed > 0 && write_int(kbd_path, 0) == 0) {
                      kbd_state.last_written = 0;
@@ -325,7 +324,7 @@
              }
          }
          nanosleep(&poll_interval, NULL);
-@@ -489,4 +337,4 @@
+@@ -489,4 +336,4 @@
      sigaction(SIGINT,  &sa, NULL);
      sigaction(SIGTERM, &sa, NULL);
      return run();

@@ -1,9 +1,7 @@
 [Unit]
 Description=Install image default user Flatpaks (Flatseal, Warehouse, Smile)
-# No network-online.target here: that is a system-level target that does not
-# exist in the per-user systemd instance. The bootstrap script only writes its
-# completion marker on success, so if a first-run install fails (e.g. offline)
-# it simply retries on the next login.
+# User systemd has no network-online.target. A failed run leaves no mark, so the
+# next login tries again.
 ConditionPathExists=/usr/bin/flatpak
 
 [Service]
@@ -13,4 +11,3 @@ ExecStart=/usr/libexec/asahi-niri/config-flatpaks.sh
 
 [Install]
 WantedBy=default.target
-

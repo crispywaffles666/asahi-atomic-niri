@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build-time Homebrew/Linuxbrew install, ported from the BlueBuild "brew"
-# module (Apache-2.0, https://github.com/blue-build/modules) with the same
-# options as bazzite-niri/asahi-bluefin: direct-pull, pinned installer commit,
-# analytics off, and NO auto-update/upgrade units (uupd owns that cadence).
-
-# Brew requires gcc and zstd; the Containerfile installs them up front.
+# Based on BlueBuild's Apache-2.0 brew module. Pin the installer, turn off its
+# updates and metrics, and let uupd handle updates.
 for dep in gcc zstd; do
     command -v "$dep" >/dev/null 2>&1 || {
         echo "ERROR: missing '$dep'; install it in the Containerfile first" >&2
@@ -22,24 +18,17 @@ curl -fLsS --retry 5 --create-dirs \
     -o /tmp/brew-install
 chmod +x /tmp/brew-install
 
-# The installer skips its root guard only when it detects a container, and it
-# must not prompt. HOME points at the build-time scratch under /home, which we
-# repack into the image below. /home is a symlink to /var/home, which does not
-# exist in the build container; create it so the symlink resolves (as the
-# blue-build brew module does). Both dirs are covered by tmpfiles at boot.
+# Brew's installer needs a container mark and a working /home link. tmpfiles
+# rebuilds both /var paths at boot.
 mkdir -p /var/home /var/roothome
 mkdir -p /home/linuxbrew
 touch /.dockerenv
 NONINTERACTIVE=1 CI=1 HOME=/home/linuxbrew /usr/bin/bash /tmp/brew-install
 rm -f /.dockerenv /tmp/brew-install
 
-# Repack the brew install as image-owned, read-only content under /usr/share.
-# At first boot brew-setup.service copies it into /var/home/linuxbrew (the
-# mutable, per-deployment user home that Homebrew actually runs from).
+# Store Brew under read-only /usr; brew-setup copies it to writable /var.
 tar --zstd -cf /tmp/homebrew-tarball.tar.zst /home/linuxbrew/.linuxbrew
 rm -rf /home/linuxbrew/.linuxbrew
-# Remove build-time brew cache residue; the runtime cache is /var/cache/homebrew
-# (created by homebrew.conf tmpfiles).
 rm -rf /var/home/linuxbrew/.cache
 mkdir -p /usr/share/homebrew/
 tar -I zstd --preserve-permissions -xf /tmp/homebrew-tarball.tar.zst -C /usr/share/homebrew/

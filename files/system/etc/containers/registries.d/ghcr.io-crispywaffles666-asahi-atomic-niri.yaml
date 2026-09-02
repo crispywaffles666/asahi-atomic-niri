@@ -1,10 +1,4 @@
-# Fedora Asahi Atomic container signature verification for this image.
-#
-# Instructs the containers/image stack (rpm-ostree / bootc / skopeo / podman)
-# to fetch sigstore signatures for images under this GHCR namespace from
-# sigstore OCI attachments stored in the registry itself (the modern cosign
-# default). Verification policy lives in /etc/containers/policy.json.
-#
+# Fetch this image's signatures from GHCR. policy.json holds the trust rule.
 # https://github.com/containers/image/blob/main/docs/containers-registries.d.5.md
 docker:
   ghcr.io/crispywaffles666/asahi-atomic-niri:

@@ -1,9 +1,5 @@
 #!/usr/bin/bash
-# Overpass Nerd Font is unavailable in Fedora repos, COPR, and the official
-# nerd-fonts release zips (only Arch builds it from the nerd-fonts source
-# tree). Fetch the pinned Arch package at build time and extract the fonts.
-# Pinned to the exact version + sha256 of the package on the reference
-# machine (otf-overpass-nerd 3.4.0-2).
+# Only Arch ships Overpass Nerd Font. Pin its package and hash for safe rebuilds.
 set -euxo pipefail
 
 PKG_VERSION="3.4.0-2"

@@ -1,38 +1,27 @@
 FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 
-# The base image's /opt is a dangling symlink to /var/opt (which does not exist
-# in the image). Brave's RPM (like Chrome's) unpacks under /opt and its cpio
-# fails to mkdir through that link ("cpio: mkdir failed - File exists"). Remove
-# the dangling link so Brave owns a real /opt directory. Under composefs this
-# makes /opt read-only image content (like /usr), which is what a browser
-# wants, and keeps Bootc's var-tmpfiles lint clean (no browser files in /var).
+# Brave cannot unpack through the base image's dangling /opt link. A real /opt
+# also keeps browser files out of /var, as bootc lint requires.
 RUN rm -rf /opt
 
-# Add third-party repositories (local .repo files: tailscale, uupd COPR)
 COPY files/dnf/*.repo /etc/yum.repos.d/
 
-# Add remaining remote repositories
 RUN dnf config-manager addrepo --from-repofile=https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo && \
     dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
 
-# Install niri desktop stack
 RUN dnf install -y \
     niri xwayland-satellite greetd tuigreet alacritty \
     xdg-desktop-portal-gnome xdg-desktop-portal-gtk gnome-keyring gnome-keyring-pam nautilus \
     noctalia ghostty satty \
     brightnessctl playerctl inotify-tools wl-clipboard wtype \
-    # iio-sensor-proxy: standard sensor userspace for the Apple Silicon ALS.
-    # Installed as the diagnostic tooling (monitor-sensor / D-Bus sensor
-    # service); asahi-brightnessd reads IIO sysfs directly and is what drives
-    # the keyboard backlight (the display stays manual).
+    # This exposes sensor checks; asahi-brightnessd reads sysfs itself.
     iio-sensor-proxy \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
     libnotify xdg-utils \
-    # gtk-update-icon-cache: rebuilds the baked-in icon theme index at image
-    # build time (see the theme installment below).
+    # The bundled icon theme needs its index built below.
     gtk-update-icon-cache \
-    # jq: the skel helper script auto-fullwidth-dp3.sh parses `niri msg --json` output.
+    # auto-fullwidth-dp3.sh reads `niri msg --json` output.
     jq \
     fastfetch \
     pulseaudio-utils \
@@ -40,18 +29,11 @@ RUN dnf install -y \
     gcc make patch \
     tailscale \
     uupd \
-    # keyd: system-wide key remapping daemon (alternateved/keyd COPR).
     keyd \
-    # Containerized dev environments. distrobox is a wrapper around podman,
-    # which the base-atomic image already ships (minimal-plus manifest).
     distrobox \
-    # Flatpak runtime + a system Flathub remote (added at first boot by
-    # flathub-setup.service). Explicit so the per-user flatpak bootstrap and
-    # uupd's flatpak module have a guaranteed base to work on.
+    # The first-login app setup and uupd both need Flatpak on the host.
     flatpak \
-    # "Boring desktop plumbing" the minimal base-atomic image does not ship:
-    # mobile/removable-storage + archive mounting via gvfs, disk management,
-    # printing, Bluetooth, CPU power profiles, archives, PDF and image viewers.
+    # The base image lacks desktop tools for disks, print, Bluetooth, and files.
     udisks2 \
     gvfs gvfs-mtp gvfs-archive gvfs-fuse \
     gnome-disk-utility \
@@ -59,10 +41,7 @@ RUN dnf install -y \
     bluez blueman \
     power-profiles-daemon \
     file-roller file-roller-nautilus evince eog \
-    # Host-native multimedia codecs (software decode) for the common codecs:
-    # H.264/HEVC/VP9/AV1/AAC etc. All plain Fedora "-free" plugins; we do NOT
-    # override Asahi's Mesa, kernel, or firmware (Asahi's AVD/VA-API hardware
-    # decode is not yet bundled upstream, so software decode is the safe win).
+    # Use Fedora's free software codecs; do not replace Asahi's hardware stack.
     ffmpeg-free \
     gstreamer1-plugins-base gstreamer1-plugins-base-tools \
     gstreamer1-plugins-good \
@@ -70,60 +49,34 @@ RUN dnf install -y \
     --exclude="swaylock,waybar,fuzzel" \
     && dnf clean all
 
-# Bake the custom desktop theming into the image (image-owned at /usr/share,
-# available to every user without a local install). Ships the live setup from
-# the developer's machine: Graphite-purple-Dark-dracula (a custom Graphite GTK
-# build recolored with the Dracula palette) and the dracula-icons-main icon
-# theme (Dracula team's icon set). The gschema override below selects both as
-# the default for new users.
+# Keep shared themes under /usr so all users get the same read-only files.
 COPY files/themes/ /usr/share/themes/
 COPY files/icons/ /usr/share/icons/
 RUN gtk-update-icon-cache /usr/share/icons/dracula-icons-main
 
-# Copy system configuration files
 COPY files/system/ /
 
-# The per-user flatpak bootstrap script ships in /usr/libexec and must be
-# executable (git does not preserve the exec bit through COPY).
+# COPY does not keep these scripts' execute bits.
 RUN chmod +x /usr/libexec/asahi-niri/config-flatpaks.sh && \
     chmod +x /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh
 
-# --- Asahi Atomic boot-chain hardening ---
-# 1) Fail-closed patch of the stock `update-m1n1`: OSTree canonicalizes /usr
-#    files to epoch-zero mtime, which makes `gzip -c` abort (status 2, "file
-#    timestamp out of range") and, under set -e, cancels the m1n1/U-Boot
-#    refresh. `gzip -nc` omits the volatile header metadata and fixed the bug.
-#    https://github.com/AsahiLinux/asahi-scripts/issues/71
-# 2) The same patch inserts a namespaced ASAHI_ATOMIC_DTBS override that is
-#    applied AFTER Fedora's update-m1n1 config is sourced but BEFORE DTBS is
-#    validated/used, so a persistent /etc config setting a stale DTBS can never
-#    silently replace the deployment-aware DTB directory the helper passes in.
-#    The patch refuses to build unless every expected anchor exists exactly once
-#    and the ordering can be proven.
+# OSTree gives /usr files a zero timestamp, which breaks `gzip -c` in
+# update-m1n1. The patch also makes the booted tree override stale /etc settings.
+# It stops the build if the stock script no longer has the known shape.
+# See https://github.com/AsahiLinux/asahi-scripts/issues/71.
 COPY files/scripts/patch-update-m1n1.sh /tmp/patch-update-m1n1.sh
 RUN chmod +x /tmp/patch-update-m1n1.sh && \
     /tmp/patch-update-m1n1.sh && \
     rm /tmp/patch-update-m1n1.sh
 
-# Non-destructive proof that the patched gzip -nc invocation is safe against the
-# image's installed U-Boot (writes only a temp file; never touches the ESP).
+# Check the installed U-Boot without writing to the ESP.
 RUN /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh gzip-check
 
-# Enable the deploy-aware m1n1 refresh (oneshot that runs only once a newly
-# booted deployment reaches multi-user, then records success; idempotent).
+# Refresh m1n1 only after the new tree has booted.
 RUN systemctl enable asahi-atomic-niri-update-m1n1.service
 
-# Enable greetd display manager, networking/switch service, automatic updates,
-# the per-user flatpak bootstrap, and the desktop plumbing services, then set the
-# graphical target. CUPS and Bluetooth use socket activation (cups.socket) so they
-# only start when first needed. power-profiles-daemon provides CPU performance
-# profile control on Apple Silicon and is socket-activated by its own service.
-#
-# Automatic OS updates: only `uupd.timer` is enabled. uupd stages bootc/rpm-ostree
-# updates but never reboots. To harden against any latent auto-apply/reboot
-# driver shipping in the base (fail closed), explicitly mask the bootc and
-# rpm-ostree automatic update timers so the *only* automatic OS update path is
-# uupd (stage, no reboot). This does not touch uupd itself or Flatpak/Brew.
+# Let uupd stage OS updates without rebooting. Mask the base image's other
+# update timers so they cannot apply an update or reboot on their own.
 RUN systemctl enable greetd.service && \
     systemctl enable tailscaled.service && \
     systemctl enable keyd.service && \
@@ -138,32 +91,27 @@ RUN systemctl enable greetd.service && \
     systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
 
-# Homebrew: stage an image-owned brew tree that brew-setup.service copies into
-# /var/home/linuxbrew on first boot. uupd owns the update cadence.
+# brew-setup copies this read-only tree to /var on first boot; uupd updates it.
 COPY files/scripts/install-brew.sh /tmp/install-brew.sh
 RUN chmod +x /tmp/install-brew.sh && \
     /tmp/install-brew.sh && \
     rm /tmp/install-brew.sh
 
-# Homebrew analytics opt-out (same as Universal Blue / secureblue)
 RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
 
-# Install Overpass Nerd Font (arch-independent Arch package)
 COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh
 RUN chmod +x /tmp/install-overpass-nerd.sh && \
     /tmp/install-overpass-nerd.sh && \
     rm /tmp/install-overpass-nerd.sh
 
-# Build and install asahi-brightnessd (pinned upstream commit, MIT) from
-# source and install it as an image-owned system daemon. gcc/make/patch are
-# already in the image's package set, so no extra build deps are pulled in.
+# Fedora has no asahi-brightnessd package, so build the pinned source.
 COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonly.patch
 COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
 RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
     /tmp/install-asahi-brightnessd.sh && \
     rm /tmp/install-asahi-brightnessd.sh
 
-# Clean broken gschema overrides and recompile
+# These base-image overrides name GNOME parts that this image removes.
 RUN rm -f /usr/share/glib-2.0/schemas/00_org.gnome.shell.gschema.override \
          /usr/share/glib-2.0/schemas/org.gnome.shell.gschema.override \
          /usr/share/glib-2.0/schemas/org.gnome.login-screen.gschema.override \
@@ -172,30 +120,22 @@ RUN rm -f /usr/share/glib-2.0/schemas/00_org.gnome.shell.gschema.override \
          /usr/share/glib-2.0/schemas/zz0-0*.gschema.override && \
     glib-compile-schemas --strict /usr/share/glib-2.0/schemas
 
-# Mask localsearch user units (unnecessary without GNOME)
+# GNOME search has no work to do on this desktop.
 RUN for u in /usr/lib/systemd/user/localsearch*.service; do \
         [ -f "$u" ] && ln -sf /dev/null "/etc/systemd/user/$(basename "$u")"; \
     done
 
-# Globally mask the inherited Fedora grub-boot-success.timer user unit. bootc
-# mounts /boot read-only, so grub2-set-bootflag can never write GRUB's
-# boot_success flag and the service fails on every login. The flag only feeds
-# GRUB's automatic menu hiding; nothing in the Asahi boot chain (the
-# deployment-aware m1n1/U-Boot refresh tracks its own success state) consumes
-# it, so the timer is masked rather than adding a privileged /boot remount.
+# bootc mounts /boot read-only, so this unit fails at each login. Asahi does not
+# read its menu-hiding flag; its m1n1 refresh tracks success on its own.
 RUN ln -sf /dev/null /etc/systemd/user/grub-boot-success.timer
 
-# Validate the final image
 COPY files/scripts/validate-image.sh /tmp/validate-image.sh
 RUN chmod +x /tmp/validate-image.sh && \
     /tmp/validate-image.sh && \
     rm /tmp/validate-image.sh
 
-# Remove dnf/package build residue so bootc lint --fatal-warnings passes, matching
-# the clean base image. dnf leaves logs and caches, package post-install scripts
-# leave /run + /var artifacts, and the greetd home gets extra .config from the
-# gnome-keyring/portal post-install (recreated where needed at boot by
-# tmpfiles.d). This is standard bootc image hygiene, not validation weakening.
+# Package hooks leave mutable files that bootc lint rejects. tmpfiles rebuilds
+# the needed paths at boot.
 RUN rm -rf \
     /var/log/dnf5.log* \
     /var/cache/libdnf5 \
@@ -206,5 +146,4 @@ RUN rm -rf \
     /run/selinux-policy \
     /tmp/*
 
-# Final static image validation (the authoritative gate)
 RUN bootc container lint --fatal-warnings

@@ -1,15 +1,12 @@
 [Unit]
 Description=Refresh Asahi m1n1/U-Boot/DTBs for the booted Atomic deployment
 Documentation=man:update-m1n1(8)
-# Runs only after this Atomic deployment has booted far enough to reach
-# multi-user.target, i.e. it has proven it can boot. It then refreshes the
-# stage-2 m1n1 payload for this exact deployment (deployment-aware, idempotent,
-# fail-closed). It never reboots or auto-applies anything itself.
+# Wait until this tree has booted, then update its stage-2 m1n1 payload. This
+# service neither reboots nor applies another update.
 After=multi-user.target
 Wants=multi-user.target
 DefaultDependencies=no
-# The deployment-success marker lives under /var (shared + persistent across
-# OSTree deployments), so ensure it is fully mounted and writable.
+# The success mark lives in /var, which all OSTree trees share.
 RequiresMountsFor=/var/lib/asahi-atomic-niri
 
 [Service]
