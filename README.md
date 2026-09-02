@@ -183,6 +183,8 @@ sudo bootc switch \
 >
 > Keep macOS recovery available. Keeping an existing Linux installation until
 > the Atomic system is proven working is strongly recommended.
+>
+> For me, it worked on the first attempt without bricking anything, but required several steps and a lot of troubleshooting. My process is documented below.
 
 ## Overview
 
