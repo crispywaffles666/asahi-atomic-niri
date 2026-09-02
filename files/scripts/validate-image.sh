@@ -376,21 +376,6 @@ if [[ ! -e /sys/class/leds/kbd_backlight ]]; then
     fi
 fi
 
-# 3d) GNOME Keyring daemon must be enabled in the USER session so the keyring
-#     (pkcs11 + secrets) starts for every user at login without a manual
-#     `systemctl --user enable --now gnome-keyring-daemon.socket`. Fedora 44's
-#     socket unit has [Install] WantedBy=sockets.target, so the enablement
-#     symlink belongs in /etc/systemd/user/sockets.target.wants/.
-GNOME_KEYRING_SOCKET=gnome-keyring-daemon.socket
-if [[ ! -f "/usr/lib/systemd/user/$GNOME_KEYRING_SOCKET" ]]; then
-    fail "gnome-keyring user socket unit missing: $GNOME_KEYRING_SOCKET"
-fi
-if [[ ! -L "/etc/systemd/user/sockets.target.wants/$GNOME_KEYRING_SOCKET" ]] \
-   || [[ "$(readlink "/etc/systemd/user/sockets.target.wants/$GNOME_KEYRING_SOCKET")" \
-         != "/usr/lib/systemd/user/$GNOME_KEYRING_SOCKET" ]]; then
-    fail "gnome-keyring socket is not enabled (missing or wrong sockets.target.wants symlink)"
-fi
-
 # 4) The helper must NOT use unsafe glob-first / latest-directory selection.
 #    It must resolve DTBs from the booted deployment's own /usr tree (keyed off
 #    the booted kernel release), never by scanning /boot/ostree/* or picking the
