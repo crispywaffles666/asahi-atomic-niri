@@ -6,8 +6,8 @@ readonly GRAPHITE_COMMIT="78562a21fce831c34cf890d5155788884e37b7f3"
 readonly GRAPHITE_SHA256="c86fa050b45127553e6233595162d68a18030ffb1272feae1f8a2a4e488dcec1"
 readonly GRAPHITE_URL="https://github.com/vinceliuice/Graphite-gtk-theme/archive/${GRAPHITE_COMMIT}.tar.gz"
 
-readonly DRACULA_ICONS_COMMIT="de2a8edd94608ba0ac4dcf5a187af0ffaa511ebc"
-readonly DRACULA_ICONS_SHA256="51db7832983249a6d296154fdb7afab7c51c32ac8813bc5bf73ee89a3e1ebb36"
+readonly DRACULA_ICONS_COMMIT="494ebc70443fadc3178d291ad0048b64b53e88fd"
+readonly DRACULA_ICONS_SHA256="02a6978ee5e1e657b159e9622a176ffe320a6cfbe6a10a42b920270ebbf68277"
 readonly DRACULA_ICONS_URL="https://github.com/m4thewz/dracula-icons/archive/${DRACULA_ICONS_COMMIT}.tar.gz"
 
 readonly GRAPHITE_THEME_DIR="/usr/share/themes/Graphite-purple-Dark-dracula"
