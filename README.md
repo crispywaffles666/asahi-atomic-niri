@@ -232,15 +232,6 @@ sudo podman run --rm \
   --acknowledge-destructive
 ```
 
-Do not use:
-
-```text
---security-opt label=type:unconfined_t
-```
-
-On the tested Fedora Asahi Minimal system that caused `crun` to fail while
-writing `/proc/self/attr/keycreate`.
-
 A successful takeover ends with:
 
 ```text
