@@ -164,6 +164,14 @@ RUN for u in /usr/lib/systemd/user/localsearch*.service; do \
         [ -f "$u" ] && ln -sf /dev/null "/etc/systemd/user/$(basename "$u")"; \
     done
 
+# Globally mask the inherited Fedora grub-boot-success.timer user unit. bootc
+# mounts /boot read-only, so grub2-set-bootflag can never write GRUB's
+# boot_success flag and the service fails on every login. The flag only feeds
+# GRUB's automatic menu hiding; nothing in the Asahi boot chain (the
+# deployment-aware m1n1/U-Boot refresh tracks its own success state) consumes
+# it, so the timer is masked rather than adding a privileged /boot remount.
+RUN ln -sf /dev/null /etc/systemd/user/grub-boot-success.timer
+
 # Validate the final image
 COPY files/scripts/validate-image.sh /tmp/validate-image.sh
 RUN chmod +x /tmp/validate-image.sh && \

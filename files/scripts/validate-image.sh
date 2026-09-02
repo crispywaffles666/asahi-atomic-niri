@@ -448,6 +448,14 @@ for _t in bootc-fetch-apply-updates.timer rpm-ostreed-automatic.timer; do
     fi
 done
 
+# 8b) The inherited Fedora grub-boot-success.timer user unit must be globally
+#     masked: bootc mounts /boot read-only, so grub2-set-bootflag can never
+#     write GRUB's boot_success flag and the service would fail on every login.
+_grub_mask=/etc/systemd/user/grub-boot-success.timer
+if [[ ! -L "$_grub_mask" ]] || [[ "$(readlink "$_grub_mask")" != "/dev/null" ]]; then
+    fail "grub-boot-success.timer user unit is not globally masked"
+fi
+
 # 9) Non-destructive, build-time-safe proof that the patched `gzip -nc` works
 #    against the installed U-Boot without writing the ESP.
 if ! "$HELPER" gzip-check; then

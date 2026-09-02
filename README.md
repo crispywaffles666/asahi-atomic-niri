@@ -131,6 +131,14 @@ Three convenience features are layered on top of the base:
   *only* automatic OS-update path is uupd's stage-only flow. You decide when to
   reboot into a staged deployment (see the boot-safety section below).
 
+  **GRUB boot-success flag:** the inherited Fedora user timer
+  `grub-boot-success.timer` is globally masked in this image. bootc mounts
+  `/boot` read-only, so `grub2-set-bootflag` could never write GRUB's
+  `boot_success` flag anyway and only produced a failed user unit on every
+  login. The flag solely feeds GRUB's automatic menu hiding — nothing in the
+  Asahi boot chain (m1n1/U-Boot refresh) consumes it — so the menu-hiding
+  success state is intentionally not maintained.
+
 Homebrew, tailscale, and the flathub system remote assume the machine's primary
 user is UID 1000 (the Fedora/Asahi default).
 
