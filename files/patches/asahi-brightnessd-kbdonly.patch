@@ -30,7 +30,7 @@
  #define DRM_BASE    "/sys/class/drm"
  #define DPMS_ATTR   "dpms"
  #define EDP_PREFIX  "eDP-"
-@@ -56,41 +57,11 @@
+@@ -56,47 +57,17 @@
  #define LUX_RESUME_PCT     75       /* % delta to resume after override */
  #define LUX_RESUME_ABS     5        /* absolute lux delta floor         */
  
@@ -71,7 +71,16 @@
 -
  /* Inverse: bright keyboard in the dark, off in daylight. */
  static const curve_point KBD_CURVE[] = {
-     {   0,  75},
+-    {   0,  75},
+-    {   5,  50},
+-    {  20,  25},
++    {   0,  40},
++    {   5,  20},
++    {  20,   5},
+     {  50,   0},
+     {1000,   0},
+ };
+ #define KBD_CURVE_LEN (sizeof(KBD_CURVE)/sizeof(KBD_CURVE[0]))
 @@ -107,10 +78,8 @@
  static volatile sig_atomic_t g_terminate = 0;
  

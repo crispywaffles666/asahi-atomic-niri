@@ -54,7 +54,7 @@ fi
 # fully manual and Noctalia shows no OSD for automatic changes. The patch is
 # checksum-locked to the same pinned upstream commit; if upstream drifts at
 # this commit the patch fails to apply and the build stops loudly.
-PATCH_SHA256="2443d8141cf8a9077a472c037265da71010b1a414ec9c65825272ac2489b4949"
+PATCH_SHA256="909066fb437c011c0bebf36bd98e5018da8b979fecd7a8bfee6d905d54b9e290"
 echo "${PATCH_SHA256}  /tmp/asahi-brightnessd-kbdonly.patch" | sha256sum -c -
 patch -p1 -d /tmp/asahi-brightnessd-src < /tmp/asahi-brightnessd-kbdonly.patch
 
