@@ -63,6 +63,49 @@ All presets use official multi-arch images that publish a `linux/arm64`
 manifest and run natively on Apple Silicon. Development containers are updated
 manually (`distrobox upgrade <name>`); uupd's distrobox module stays disabled.
 
+## Automatic brightness (ambient light sensor)
+
+`asahi-brightnessd` (built into the image from pinned, MIT-licensed
+[upstream](https://github.com/craig-miller/asahi-brightnessd) source at image
+build time) is an image-owned system daemon that drives **both** backlights
+from the Apple Silicon ambient light sensor:
+
+- the **display** backlight rises with ambient light (like macOS)
+- the **keyboard** backlight is the inverse — bright in the dark, off once the
+  room is bright enough
+
+It polls `/sys/bus/iio/devices/iio:deviceN/in_illuminance_input`, reads the AC
+power-supply state, and writes to
+`/sys/class/backlight/apple-panel-bl/brightness` and
+`/sys/class/leds/kbd_backlight/brightness`.
+
+**Manual changes are respected as overrides.** A manual change from Noctalia
+or `brightnessctl` pauses auto control for *that channel only* — display and
+keyboard override independently. Auto control resumes for a channel once the
+ambient light shifts by roughly 75% (or a small absolute amount in low light).
+
+`iio-sensor-proxy` is installed alongside as the standard Fedora sensor
+userspace, so `monitor-sensor` is available for diagnostics. It does **not**
+control brightness in this image — `asahi-brightnessd` does.
+
+Diagnostics:
+
+```sh
+systemctl status asahi-brightnessd
+journalctl -u asahi-brightnessd
+monitor-sensor
+find /sys/bus/iio/devices -name in_illuminance_input -print
+```
+
+**ALS availability depends on the Asahi kernel and per-machine firmware.** The
+`aop-als` IIO driver ships in the Asahi kernel (6.19+), but the sensor needs
+factory calibration firmware that is per-machine and cannot be redistributed.
+On Fedora Asahi, get it by booting macOS / macOS Recovery, re-running the
+Asahi installer, and choosing **Rebuild vendor firmware package**. The daemon
+service skips machines without the panel backlight and retries harmlessly
+(never blocking boot) until the ALS is available, so a missing/uncalibrated
+sensor cannot break the image.
+
 ## Homebrew, Tailscale, and automatic updates
 
 Three convenience features are layered on top of the base:
@@ -581,7 +624,12 @@ logic, exporting `ASAHI_ATOMIC_DTBS` rather than plain `DTBS`), the
 `asahi-atomic-niri-update-m1n1.service` unit present and enabled, the container
 signature key / `registries.d` / `policy.json` present with the expected GHCR
 namespace, and the update configuration never auto-rebooting (auto-apply timers
-masked). It then runs a non-destructive `gzip -nc` self-test and a
+masked). It also requires `iio-sensor-proxy` and `monitor-sensor`, the
+`asahi-brightnessd` binary at `/usr/sbin/asahi-brightnessd` (executable), its
+unit present and enabled with an `ExecStart` binary that exists and the
+panel-backlight `ConditionPathExists` gate, plus a hardware-free smoke test that
+the daemon fails cleanly (non-zero exit, no hang) when no Asahi sysfs exists.
+It then runs a non-destructive `gzip -nc` self-test and a
 non-destructive behavioral conflict test proving that a stale config-provided
 `DTBS` cannot override the deployment-aware path during an `update-m1n1`
 refresh. The final authoritative gate remains `bootc container lint
@@ -601,6 +649,7 @@ refresh. The final authoritative gate remains `bootc container lint
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
 │   │   ├── install-brew.sh           # stage homebrew at build time
+│   │   ├── install-asahi-brightnessd.sh  # build/install pinned upstream ALS daemon
 │   │   ├── patch-update-m1n1.sh      # fail-closed Atomic patch (gzip -nc + ASAHI_ATOMIC_DTBS override)
 │   │   └── validate-image.sh         # build-time assertions + boot-safety checks
 │   └── system/                      # copied into the image
@@ -620,6 +669,7 @@ refresh. The final authoritative gate remains `bootc container lint
 │           │   ├── systemd/
 │           │   │   ├── system/
 │           │   │   │   ├── asahi-atomic-niri-update-m1n1.service  # deploy-aware refresh
+│           │   │   │   ├── asahi-brightnessd.service  # ALS auto-brightness daemon
 │           │   │   │   ├── brew-setup.service, flathub-setup.service
 │           │   │   │   └── user/config-flatpaks.service  # per-user Flatpaks
 │           │   │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf

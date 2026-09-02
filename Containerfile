@@ -21,6 +21,11 @@ RUN dnf install -y \
     xdg-desktop-portal-gnome xdg-desktop-portal-gtk gnome-keyring nautilus \
     noctalia ghostty satty \
     brightnessctl playerctl inotify-tools wl-clipboard wtype \
+    # iio-sensor-proxy: standard sensor userspace for the Apple Silicon ALS.
+    # Installed as the diagnostic tooling (monitor-sensor / D-Bus sensor
+    # service); asahi-brightnessd reads IIO sysfs directly and is what
+    # actually drives brightness.
+    iio-sensor-proxy \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
     libnotify xdg-utils \
@@ -109,6 +114,7 @@ RUN systemctl enable asahi-atomic-niri-update-m1n1.service
 RUN systemctl enable greetd.service && \
     systemctl enable tailscaled.service && \
     systemctl enable keyd.service && \
+    systemctl enable asahi-brightnessd.service && \
     systemctl enable uupd.timer && \
     systemctl enable flathub-setup.service && \
     systemctl enable brew-setup.service && \
@@ -146,6 +152,14 @@ COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh
 RUN chmod +x /tmp/install-overpass-nerd.sh && \
     /tmp/install-overpass-nerd.sh && \
     rm /tmp/install-overpass-nerd.sh
+
+# Build and install asahi-brightnessd (pinned upstream commit, MIT) from
+# source and install it as an image-owned system daemon. gcc/make are already
+# in the image's package set, so no extra build deps are pulled in.
+COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
+RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
+    /tmp/install-asahi-brightnessd.sh && \
+    rm /tmp/install-asahi-brightnessd.sh
 
 # Clean broken gschema overrides and recompile
 RUN rm -f /usr/share/glib-2.0/schemas/00_org.gnome.shell.gschema.override \

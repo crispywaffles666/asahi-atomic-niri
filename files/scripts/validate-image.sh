@@ -31,6 +31,9 @@ REQUIRED_PACKAGES=(
     bluez
     blueman
     power-profiles-daemon
+    # Standard sensor userspace for the Apple Silicon ALS (diagnostics:
+    # monitor-sensor / D-Bus). asahi-brightnessd reads IIO sysfs directly.
+    iio-sensor-proxy
     file-roller
     file-roller-nautilus
     evince
@@ -126,6 +129,7 @@ REQUIRED_BINARIES=(
     xwayland-satellite
     playerctl
     brightnessctl
+    monitor-sensor
     wl-copy
     wl-paste
     wtype
@@ -329,7 +333,49 @@ if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$KEYD_UNIT" ]]; then
     fail "keyd unit is not enabled (no multi-user.target.wants symlink)"
 fi
 
-# 3c) GNOME Keyring daemon must be enabled in the USER session so the keyring
+# 3c) Ambient-light auto-brightness daemon (asahi-brightnessd).
+BRIGHTNESSD=/usr/sbin/asahi-brightnessd
+if [[ ! -x "$BRIGHTNESSD" ]]; then
+    fail "asahi-brightnessd binary missing or not executable: $BRIGHTNESSD"
+fi
+BRIGHTNESSD_UNIT=asahi-brightnessd.service
+UNIT_FILE="/usr/lib/systemd/system/$BRIGHTNESSD_UNIT"
+if [[ ! -f "$UNIT_FILE" ]]; then
+    fail "asahi-brightnessd systemd unit missing: $BRIGHTNESSD_UNIT"
+fi
+if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$BRIGHTNESSD_UNIT" ]]; then
+    fail "asahi-brightnessd unit is not enabled (no multi-user.target.wants symlink)"
+fi
+# The unit must reference a real, executable binary.
+_execstart=$(grep -E '^ExecStart=' "$UNIT_FILE" | head -n1)
+if [[ -z "$_execstart" ]]; then
+    fail "asahi-brightnessd unit has no ExecStart"
+fi
+_execstart_bin=${_execstart#ExecStart=}
+_execstart_bin=${_execstart_bin%% *}
+if [[ ! -x "$_execstart_bin" ]]; then
+    fail "asahi-brightnessd unit ExecStart binary not found/executable: $_execstart_bin"
+fi
+# The unit must skip cleanly on hardware without the Apple Silicon panel
+# backlight rather than crash-looping.
+grep -Eq '^ConditionPathExists=/sys/class/backlight/apple-panel-bl/max_brightness' "$UNIT_FILE" \
+    || fail "asahi-brightnessd unit is missing the panel-backlight ConditionPathExists"
+# Non-hardware smoke test: upstream has no --help/offline mode, so the only
+# build-safe check is that the daemon FAILS CLEANLY (non-zero exit, no hang)
+# when the panel backlight is absent — which is the container-build case.
+# Never run this if a real apple-panel-bl exists: a build host with live
+# Asahi hardware must not have its brightness written by the test.
+if [[ ! -e /sys/class/backlight/apple-panel-bl ]]; then
+    set +e
+    timeout 10 "$BRIGHTNESSD" >/dev/null 2>&1
+    _brightnessd_rc=$?
+    set -e
+    if [[ "$_brightnessd_rc" -eq 0 || "$_brightnessd_rc" -eq 124 ]]; then
+        fail "asahi-brightnessd did not fail cleanly without hardware (exit $_brightnessd_rc)"
+    fi
+fi
+
+# 3d) GNOME Keyring daemon must be enabled in the USER session so the keyring
 #     (pkcs11 + secrets) starts for every user at login without a manual
 #     `systemctl --user enable --now gnome-keyring-daemon.socket`. Fedora 44's
 #     socket unit has [Install] WantedBy=sockets.target, so the enablement
