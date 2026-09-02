@@ -232,6 +232,10 @@ wifi            = true
 bluetooth       = true
 lock_keys       = true
 keyboard_layout = true
+# The image's asahi-brightnessd auto-drives only the keyboard backlight from
+# the ALS. Suppress its OSD so ambient adjustments stay silent; volume,
+# brightness (manual), and other OSDs remain enabled.
+keyboard_backlight = false
 
 # ── Keybinds ──
 

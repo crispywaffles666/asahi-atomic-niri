@@ -356,16 +356,17 @@ _execstart_bin=${_execstart_bin%% *}
 if [[ ! -x "$_execstart_bin" ]]; then
     fail "asahi-brightnessd unit ExecStart binary not found/executable: $_execstart_bin"
 fi
-# The unit must skip cleanly on hardware without the Apple Silicon panel
-# backlight rather than crash-looping.
-grep -Eq '^ConditionPathExists=/sys/class/backlight/apple-panel-bl/max_brightness' "$UNIT_FILE" \
-    || fail "asahi-brightnessd unit is missing the panel-backlight ConditionPathExists"
+# The unit must skip cleanly on hardware without the keyboard backlight
+# rather than crash-looping. (This image builds a kbd-only asahi-brightnessd;
+# the display backlight is left manual.)
+grep -Eq '^ConditionPathExists=/sys/class/leds/kbd_backlight/max_brightness' "$UNIT_FILE" \
+    || fail "asahi-brightnessd unit is missing the kbd-backlight ConditionPathExists"
 # Non-hardware smoke test: upstream has no --help/offline mode, so the only
 # build-safe check is that the daemon FAILS CLEANLY (non-zero exit, no hang)
-# when the panel backlight is absent — which is the container-build case.
-# Never run this if a real apple-panel-bl exists: a build host with live
+# when the kbd backlight is absent — which is the container-build case.
+# Never run this if a real kbd_backlight exists: a build host with live
 # Asahi hardware must not have its brightness written by the test.
-if [[ ! -e /sys/class/backlight/apple-panel-bl ]]; then
+if [[ ! -e /sys/class/leds/kbd_backlight ]]; then
     set +e
     timeout 10 "$BRIGHTNESSD" >/dev/null 2>&1
     _brightnessd_rc=$?

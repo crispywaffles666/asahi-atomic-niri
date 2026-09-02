@@ -1,0 +1,325 @@
+--- a/asahi-brightnessd.c
++++ b/asahi-brightnessd.c
+@@ -2,13 +2,16 @@
+  * asahi-brightnessd — ambient-light auto-brightness for Apple Silicon Macs
+  * running Asahi Linux.
+  *
+- * Reads lux from the aop-sensors-als IIO device and drives both
+- * /sys/class/backlight/apple-panel-bl and /sys/class/leds/kbd_backlight.
++ * Reads lux from the aop-sensors-als IIO device and drives the keyboard
++ * backlight (/sys/class/leds/kbd_backlight). The display backlight is left
++ * fully manual: asahi-brightnessd in its stock form drives the panel too, but
++ * the asahi-atomic-niri image intentionally drops that channel so Noctalia
++ * never pops a brightness OSD from ambient-light adjustments.
+  *
+  * External writes (e.g. brightnessctl invoked by the compositor's
+  * XF86MonBrightnessUp/Down bindings) are detected by comparing the observed
+  * value against what we last wrote. When a divergence is seen, the daemon
+- * yields control of that channel until ambient light shifts significantly.
++ * yields control of the channel until ambient light shifts significantly.
+  *
+  * Curve constants are adapted from juicecultus/asahi-auto-brightness (MIT).
+  */
+@@ -38,9 +41,7 @@
+ #define IIO_BASE    "/sys/bus/iio/devices"
+ #define ALS_NAME    "aop-sensors-als"
+ #define ALS_ATTR    "in_illuminance_input"
+-#define SCREEN_DIR  "/sys/class/backlight/apple-panel-bl"
+ #define KBD_DIR     "/sys/class/leds/kbd_backlight"
+-#define AC_ONLINE   "/sys/class/power_supply/macsmc-ac/online"
+ #define DRM_BASE    "/sys/class/drm"
+ #define DPMS_ATTR   "dpms"
+ #define EDP_PREFIX  "eDP-"
+@@ -56,41 +57,11 @@
+ #define LUX_RESUME_PCT     75       /* % delta to resume after override */
+ #define LUX_RESUME_ABS     5        /* absolute lux delta floor         */
+ 
+-#define SCREEN_FLOOR_PCT   2        /* never let screen go fully dark   */
+ #define KBD_FLOOR_PCT      0
+ 
+-/* When plugged into AC, scale the screen curve up by this many percentage
+- * points (target_pct += AC_SCREEN_BOOST), clamped to 100. The keyboard
+- * curve is unaffected — visibility in the dark is power-source neutral. */
+-#define AC_SCREEN_BOOST    30
+-#define AC_RECHECK_TICKS   30       /* poll AC status ~1 Hz */
+-
+-/* When a Noctalia shell is running, fire a brightness-suppress IPC just
+- * before each screen-channel sysfs write so its OSD stays quiet for
+- * ALS-driven adjustments. 100 ms covers a few poll ticks of headroom; if
+- * Noctalia isn't reachable the call fails silently and the daemon keeps
+- * driving the backlight. */
+-#define NOCTALIA_SUPPRESS_MS   100
+-#define NOCTALIA_SOCK_PREFIX   "noctalia-wayland-"
+-#define NOCTALIA_USER_ROOT     "/run/user"
+-
+ /* lux → percentage curves (linearly interpolated) */
+ typedef struct { int lux; int pct; } curve_point;
+ 
+-static const curve_point SCREEN_CURVE[] = {
+-    {   0,   2},
+-    {   1,   3},
+-    {   5,   6},
+-    {  20,  12},
+-    {  50,  24},
+-    { 100,  40},
+-    { 200,  60},
+-    { 400,  80},
+-    { 700,  92},
+-    {1000, 100},
+-};
+-#define SCREEN_CURVE_LEN (sizeof(SCREEN_CURVE)/sizeof(SCREEN_CURVE[0]))
+-
+ /* Inverse: bright keyboard in the dark, off in daylight. */
+ static const curve_point KBD_CURVE[] = {
+     {   0,  75},
+@@ -107,10 +78,8 @@
+ static volatile sig_atomic_t g_terminate = 0;
+ 
+ static char als_path[PATH_MAX];
+-static char screen_path[PATH_MAX];
+ static char kbd_path[PATH_MAX];
+ static char dpms_path[PATH_MAX] = "";   /* "" if no eDP connector found */
+-static int  screen_max;
+ static int  kbd_max;
+ 
+ typedef struct {
+@@ -119,15 +88,7 @@
+     int  override_baseline_lux;
+ } channel_state;
+ 
+-static channel_state screen_state = { -1, false, 0 };
+-static channel_state kbd_state    = { -1, false, 0 };
+-
+-static bool g_on_ac = false;
+-static int  g_ac_recheck = 0;
+-
+-/* Cached Noctalia IPC socket path. Empty string means "unknown / not running".
+- * Re-discovered on the next call after a connect failure. */
+-static char g_noctalia_sock[PATH_MAX] = "";
++static channel_state kbd_state = { -1, false, 0 };
+ 
+ /* ------------------------------------------------------------------ */
+ /* Signals                                                            */
+@@ -235,92 +196,6 @@
+ }
+ 
+ /* ------------------------------------------------------------------ */
+-/* Noctalia IPC                                                       */
+-/* ------------------------------------------------------------------ */
+-
+-/* Find the first /run/user/<uid>/noctalia-*.sock and copy the absolute path
+- * into out. Returns 0 on success. */
+-static int find_noctalia_socket(char *out, size_t outsz) {
+-    DIR *d = opendir(NOCTALIA_USER_ROOT);
+-    if (!d) return -1;
+-    struct dirent *de;
+-    while ((de = readdir(d)) != NULL) {
+-        if (de->d_name[0] == '.') continue;
+-        char user_dir[PATH_MAX];
+-        int n = snprintf(user_dir, sizeof(user_dir), "%s/%s",
+-                         NOCTALIA_USER_ROOT, de->d_name);
+-        if (n < 0 || (size_t)n >= sizeof(user_dir)) continue;
+-        DIR *ud = opendir(user_dir);
+-        if (!ud) continue;
+-        struct dirent *ude;
+-        while ((ude = readdir(ud)) != NULL) {
+-            if (strncmp(ude->d_name, NOCTALIA_SOCK_PREFIX,
+-                        sizeof(NOCTALIA_SOCK_PREFIX) - 1) != 0) continue;
+-            size_t len = strlen(ude->d_name);
+-            if (len < 5 || strcmp(ude->d_name + len - 5, ".sock") != 0) continue;
+-            n = snprintf(out, outsz, "%s/%s", user_dir, ude->d_name);
+-            closedir(ud);
+-            closedir(d);
+-            return (n > 0 && (size_t)n < outsz) ? 0 : -1;
+-        }
+-        closedir(ud);
+-    }
+-    closedir(d);
+-    return -1;
+-}
+-
+-/* Fire-and-forget: ask Noctalia to suppress its brightness OSD for `ms`.
+- * Blocks briefly (≤50 ms) on the socket round-trip so the suppression
+- * window is established before the sysfs write fires inotify. Failures
+- * (no socket, connect refused, etc.) are silently ignored. */
+-static void noctalia_suppress_osd(int ms) {
+-    if (g_noctalia_sock[0] == '\0') {
+-        if (find_noctalia_socket(g_noctalia_sock,
+-                                 sizeof(g_noctalia_sock)) != 0) {
+-            return;
+-        }
+-    }
+-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+-    if (fd < 0) return;
+-    int flags = fcntl(fd, F_GETFD);
+-    if (flags >= 0) (void)fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+-    struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 };
+-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+-    struct sockaddr_un addr;
+-    memset(&addr, 0, sizeof(addr));
+-    addr.sun_family = AF_UNIX;
+-    /* Unix domain sun_path is 108 bytes on Linux but g_noctalia_sock is
+-     * PATH_MAX (4096). A path that doesn't fit can't reach the socket,
+-     * and a silent strncpy truncation would point connect() at an
+-     * unrelated path. Bail explicitly and invalidate the cache. */
+-    size_t sock_len = strlen(g_noctalia_sock);
+-    if (sock_len >= sizeof(addr.sun_path)) {
+-        g_noctalia_sock[0] = '\0';
+-        close(fd);
+-        return;
+-    }
+-    memcpy(addr.sun_path, g_noctalia_sock, sock_len);  /* sun_path zero-initialised */
+-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+-        /* Stale path (compositor restart/exit). Invalidate so the next
+-         * call rediscovers — or, if noctalia is gone, gives up cheaply. */
+-        g_noctalia_sock[0] = '\0';
+-        close(fd);
+-        return;
+-    }
+-    char cmd[64];
+-    int n = snprintf(cmd, sizeof(cmd), "brightness-suppress %d\n", ms);
+-    if (n > 0) {
+-        ssize_t w = write(fd, cmd, (size_t)n);
+-        (void)w;
+-        char buf[32];
+-        ssize_t r = read(fd, buf, sizeof(buf));  /* wait for response */
+-        (void)r;
+-    }
+-    close(fd);
+-}
+-
+-/* ------------------------------------------------------------------ */
+ /* Curve evaluation                                                   */
+ /* ------------------------------------------------------------------ */
+ static int interpolate(const curve_point *curve, size_t n, int lux) {
+@@ -342,14 +217,6 @@
+     return pct * max_units / 100;
+ }
+ 
+-/* Re-read AC status every AC_RECHECK_TICKS ticks. */
+-static void refresh_ac_status(void) {
+-    if (g_ac_recheck > 0) { g_ac_recheck--; return; }
+-    g_ac_recheck = AC_RECHECK_TICKS;
+-    int online = read_int(AC_ONLINE);
+-    g_on_ac = (online == 1);
+-}
+-
+ /* Exponential smoothing: move alpha (= 1/2^SMOOTH_SHIFT) of the remaining
+  * gap toward target each tick. Large deltas move quickly; small deltas
+  * fall below the perceptual threshold automatically. The fallback ±1 step
+@@ -374,14 +241,10 @@
+     return (delta * 100 / baseline) >= LUX_RESUME_PCT;
+ }
+ 
+-/* Update one channel: detect override, compute target, step.
+- * When `announce_to_noctalia` is true, fire a brightness-suppress IPC
+- * immediately before each sysfs write so Noctalia's OSD stays quiet for
+- * ALS-driven adjustments. */
++/* Update one channel: detect override, compute target, step. */
+ static void tick_channel(channel_state *st, const char *path,
+                          const curve_point *curve, size_t curve_len,
+-                         int max_units, int floor_pct, int boost_pct, int lux,
+-                         bool announce_to_noctalia)
++                         int max_units, int floor_pct, int lux)
+ {
+     int observed = read_int(path);
+     if (observed < 0) return;
+@@ -399,14 +262,11 @@
+         return;
+     }
+ 
+-    int pct    = interpolate(curve, curve_len, lux) + boost_pct;
++    int pct    = interpolate(curve, curve_len, lux);
+     int target = pct_to_units(pct, max_units, floor_pct);
+     int next   = step_toward(observed, target, max_units);
+ 
+     if (next != observed) {
+-        if (announce_to_noctalia) {
+-            noctalia_suppress_osd(NOCTALIA_SUPPRESS_MS);
+-        }
+         if (write_int(path, next) == 0) {
+             int readback = read_int(path);
+             st->last_written = readback >= 0 ? readback : next;
+@@ -420,17 +280,14 @@
+ /* Main loop                                                          */
+ /* ------------------------------------------------------------------ */
+ static int run(void) {
+-    char screen_max_path[PATH_MAX], kbd_max_path[PATH_MAX];
+-    snprintf(screen_path,     sizeof(screen_path),     "%s/brightness",     SCREEN_DIR);
+-    snprintf(screen_max_path, sizeof(screen_max_path), "%s/max_brightness", SCREEN_DIR);
++    char kbd_max_path[PATH_MAX];
+     snprintf(kbd_path,        sizeof(kbd_path),        "%s/brightness",     KBD_DIR);
+     snprintf(kbd_max_path,    sizeof(kbd_max_path),    "%s/max_brightness", KBD_DIR);
+ 
+-    screen_max = read_int(screen_max_path);
+-    kbd_max    = read_int(kbd_max_path);
+-    if (screen_max <= 0 || kbd_max <= 0) {
+-        fprintf(stderr, "asahi-brightnessd: could not read max_brightness "
+-                "(screen=%d kbd=%d)\n", screen_max, kbd_max);
++    kbd_max = read_int(kbd_max_path);
++    if (kbd_max <= 0) {
++        fprintf(stderr, "asahi-brightnessd: could not read kbd max_brightness "
++                "(kbd=%d)\n", kbd_max);
+         return 1;
+     }
+     if (locate_als(als_path, sizeof(als_path)) != 0) {
+@@ -438,42 +295,33 @@
+                 "(no iio:device* with name=%s)\n", ALS_NAME);
+         return 1;
+     }
+-    /* DPMS lookup is best-effort. Without it the daemon still drives
+-     * both channels from lux; it just won't zero kbd when the panel
++    /* DPMS lookup is best-effort. Without it the daemon still drives the
++     * kbd backlight from lux; it just won't zero kbd when the panel
+      * blanks. */
+     (void)locate_edp_dpms(dpms_path, sizeof(dpms_path));
+     fprintf(stderr,
+-            "asahi-brightnessd: als=%s screen_max=%d kbd_max=%d dpms=%s\n",
+-            als_path, screen_max, kbd_max,
++            "asahi-brightnessd: als=%s kbd_max=%d dpms=%s\n",
++            als_path, kbd_max,
+             dpms_path[0] ? dpms_path : "(none)");
+ 
+     struct timespec poll_interval = { .tv_sec = 0, .tv_nsec = POLL_NSEC };
+     while (!g_terminate) {
+-        refresh_ac_status();
+         int lux = read_int(als_path);
+         if (lux >= 0) {
+             if (dpms_is_off(dpms_path)) {
+-                /* Panel is blanked. Force kbd off and skip the screen
+-                 * channel — writes to apple-panel-bl while the panel is
+-                 * dark are wasted, and the kernel preserves the value
+-                 * for when DPMS resumes. Clearing override_active means
+-                 * a manual kbd setting from before idle doesn't fight
+-                 * the forced zero on the way down. */
++                /* Panel is blanked. Force kbd off and clear override state —
++                 * writes while the panel is dark are pointless, and clearing
++                 * override_active means a manual kbd setting from before idle
++                 * doesn't fight the forced zero on the way down. */
+                 int observed = read_int(kbd_path);
+                 if (observed > 0 && write_int(kbd_path, 0) == 0) {
+                     kbd_state.last_written = 0;
+                     kbd_state.override_active = false;
+                 }
+             } else {
+-                int screen_boost = g_on_ac ? AC_SCREEN_BOOST : 0;
+-                tick_channel(&screen_state, screen_path,
+-                             SCREEN_CURVE, SCREEN_CURVE_LEN,
+-                             screen_max, SCREEN_FLOOR_PCT, screen_boost, lux,
+-                             true);
+                 tick_channel(&kbd_state, kbd_path,
+                              KBD_CURVE, KBD_CURVE_LEN,
+-                             kbd_max, KBD_FLOOR_PCT, 0, lux,
+-                             false);
++                             kbd_max, KBD_FLOOR_PCT, lux);
+             }
+         }
+         nanosleep(&poll_interval, NULL);
+@@ -489,4 +337,4 @@
+     sigaction(SIGINT,  &sa, NULL);
+     sigaction(SIGTERM, &sa, NULL);
+     return run();
+-}
++}
+\ No newline at end of file

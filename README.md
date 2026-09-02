@@ -67,21 +67,22 @@ manually (`distrobox upgrade <name>`); uupd's distrobox module stays disabled.
 
 `asahi-brightnessd` (built into the image from pinned, MIT-licensed
 [upstream](https://github.com/craig-miller/asahi-brightnessd) source at image
-build time) is an image-owned system daemon that drives **both** backlights
-from the Apple Silicon ambient light sensor:
+build time, with a kbd-only patch applied) is an image-owned system daemon
+that drives the **keyboard** backlight from the Apple Silicon ambient light
+sensor — bright in the dark, off once the room is bright enough.
 
-- the **display** backlight rises with ambient light (like macOS)
-- the **keyboard** backlight is the inverse — bright in the dark, off once the
-  room is bright enough
+It polls `/sys/bus/iio/devices/iio:deviceN/in_illuminance_input` and writes to
+`/sys/class/leds/kbd_backlight/brightness`. It also zeros the keyboard
+backlight when the internal panel blanks (DPMS).
 
-It polls `/sys/bus/iio/devices/iio:deviceN/in_illuminance_input`, reads the AC
-power-supply state, and writes to
-`/sys/class/backlight/apple-panel-bl/brightness` and
-`/sys/class/leds/kbd_backlight/brightness`.
+The **display** backlight is **not** auto-driven: the stock daemon's screen
+channel is deliberately dropped so Noctalia never pops a brightness OSD from
+ambient-light adjustments. The display is fully manual via the
+`XF86MonBrightnessUp/Down` keys (brightnessctl) or Noctalia's slider — and
+those manual changes still show Noctalia's brightness OSD.
 
 **Manual changes are respected as overrides.** A manual change from Noctalia
-or `brightnessctl` pauses auto control for *that channel only* — display and
-keyboard override independently. Auto control resumes for a channel once the
+or `brightnessctl` pauses auto control of the keyboard backlight until the
 ambient light shifts by roughly 75% (or a small absolute amount in low light).
 
 `iio-sensor-proxy` is installed alongside as the standard Fedora sensor
@@ -651,9 +652,11 @@ refresh. The final authoritative gate remains `bootc container lint
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
 │   │   ├── install-brew.sh           # stage homebrew at build time
-│   │   ├── install-asahi-brightnessd.sh  # build/install pinned upstream ALS daemon
+│   │   ├── install-asahi-brightnessd.sh  # build/install pinned upstream ALS daemon (kbd-only patch applied)
 │   │   ├── patch-update-m1n1.sh      # fail-closed Atomic patch (gzip -nc + ASAHI_ATOMIC_DTBS override)
 │   │   └── validate-image.sh         # build-time assertions + boot-safety checks
+│   ├── patches/
+│   │   └── asahi-brightnessd-kbdonly.patch  # strip the display channel so auto-brightness never pops Noctalia OSDs
 │   └── system/                      # copied into the image
 │       ├── etc/
 │       │   ├── containers/
@@ -671,7 +674,7 @@ refresh. The final authoritative gate remains `bootc container lint
 │           │   ├── systemd/
 │           │   │   ├── system/
 │           │   │   │   ├── asahi-atomic-niri-update-m1n1.service  # deploy-aware refresh
-│           │   │   │   ├── asahi-brightnessd.service  # ALS auto-brightness daemon
+│           │   │   │   ├── asahi-brightnessd.service  # ALS auto-brightness daemon (kbd only)
 │           │   │   │   ├── brew-setup.service, flathub-setup.service
 │           │   │   │   └── user/config-flatpaks.service  # per-user Flatpaks
 │           │   │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf

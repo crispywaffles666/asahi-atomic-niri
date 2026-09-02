@@ -1,16 +1,18 @@
 [Unit]
-Description=Ambient-light auto-brightness (display + keyboard backlight)
+Description=Ambient-light auto-brightness (keyboard backlight)
 Documentation=https://github.com/craig-miller/asahi-brightnessd
 # System-level daemon: no graphical session, niri, or Noctalia dependency. It
 # reads lux from the aop-sensors-als IIO device and writes
-# /sys/class/backlight/apple-panel-bl and /sys/class/leds/kbd_backlight.
+# /sys/class/leds/kbd_backlight. This image builds a kbd-only build (see
+# install-asahi-brightnessd.sh): the display backlight is left fully manual so
+# Noctalia never pops a brightness OSD from ambient-light adjustments.
 # Start after udev so the backlight/ALS drivers have probed.
 #
-# Machines without an Apple Silicon panel backlight skip the unit entirely.
-# With a panel but no ALS/calibration, the daemon exits non-zero and
+# Machines without an Apple Silicon + kbd backlight setup skip the unit
+# entirely. With a kbd but no ALS/calibration, the daemon exits non-zero and
 # Restart=on-failure retries every 5 s: boot is never blocked, and it
 # self-heals once the ALS calibration firmware is in place.
-ConditionPathExists=/sys/class/backlight/apple-panel-bl/max_brightness
+ConditionPathExists=/sys/class/leds/kbd_backlight/max_brightness
 After=systemd-udevd.service
 Wants=systemd-udevd.service
 
@@ -19,8 +21,8 @@ Type=simple
 ExecStart=/usr/sbin/asahi-brightnessd
 Restart=on-failure
 RestartSec=5s
-# Runs as root: the daemon needs read/write on /sys/class/backlight/ and
-# /sys/class/leds/, plus read on /sys/bus/iio/ and the AC power-supply state.
+# Runs as root: the daemon needs read/write on /sys/class/leds/, plus read on
+# /sys/bus/iio/ and the DRM connectors (DPMS).
 # ProtectSystem=strict exempts the API filesystems, so /sys stays writable.
 ProtectSystem=strict
 ProtectHome=yes

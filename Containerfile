@@ -23,8 +23,8 @@ RUN dnf install -y \
     brightnessctl playerctl inotify-tools wl-clipboard wtype \
     # iio-sensor-proxy: standard sensor userspace for the Apple Silicon ALS.
     # Installed as the diagnostic tooling (monitor-sensor / D-Bus sensor
-    # service); asahi-brightnessd reads IIO sysfs directly and is what
-    # actually drives brightness.
+    # service); asahi-brightnessd reads IIO sysfs directly and is what drives
+    # the keyboard backlight (the display stays manual).
     iio-sensor-proxy \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
@@ -154,8 +154,9 @@ RUN chmod +x /tmp/install-overpass-nerd.sh && \
     rm /tmp/install-overpass-nerd.sh
 
 # Build and install asahi-brightnessd (pinned upstream commit, MIT) from
-# source and install it as an image-owned system daemon. gcc/make are already
-# in the image's package set, so no extra build deps are pulled in.
+# source and install it as an image-owned system daemon. gcc/make/patch are
+# already in the image's package set, so no extra build deps are pulled in.
+COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonly.patch
 COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
 RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
     /tmp/install-asahi-brightnessd.sh && \
