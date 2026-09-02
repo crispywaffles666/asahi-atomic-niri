@@ -1,6 +1,6 @@
 [org.gnome.desktop.interface]
 color-scheme='prefer-dark'
 gtk-theme='Graphite-purple-Dark-dracula'
-icon-theme='Colloid-Dracula-Dark'
+icon-theme='dracula-icons-main'
 font-name='Overpass Nerd Font 12'
 monospace-font-name='Overpass Mono 10'

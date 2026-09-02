@@ -29,6 +29,9 @@ RUN dnf install -y \
     pavucontrol cava seahorse xterm zsh bat micro geany \
     ripgrep stow yazi starship overpass-fonts \
     libnotify xdg-utils \
+    # gtk-update-icon-cache: rebuilds the baked-in icon theme index at image
+    # build time (see the theme installment below).
+    gtk-update-icon-cache \
     # jq: the skel helper script auto-fullwidth-dp3.sh parses `niri msg --json` output.
     jq \
     fastfetch \
@@ -66,6 +69,16 @@ RUN dnf install -y \
     gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free \
     --exclude="swaylock,waybar,fuzzel" \
     && dnf clean all
+
+# Bake the custom desktop theming into the image (image-owned at /usr/share,
+# available to every user without a local install). Ships the live setup from
+# the developer's machine: Graphite-purple-Dark-dracula (a custom Graphite GTK
+# build recolored with the Dracula palette) and the dracula-icons-main icon
+# theme (Dracula team's icon set). The gschema override below selects both as
+# the default for new users.
+COPY files/themes/ /usr/share/themes/
+COPY files/icons/ /usr/share/icons/
+RUN gtk-update-icon-cache /usr/share/icons/dracula-icons-main
 
 # Copy system configuration files
 COPY files/system/ /
