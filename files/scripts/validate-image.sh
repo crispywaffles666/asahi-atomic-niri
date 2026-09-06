@@ -410,6 +410,15 @@ if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$KEYD_UNIT" ]]; then
     fail "keyd unit is not enabled (no multi-user.target.wants symlink)"
 fi
 
+BREW_UNIT=brew-setup.service
+if [[ ! -f "/usr/lib/systemd/system/$BREW_UNIT" ]]; then
+    fail "brew setup systemd unit missing: $BREW_UNIT"
+fi
+if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$BREW_UNIT" ]] && \
+   [[ ! -L "/etc/systemd/system/default.target.wants/$BREW_UNIT" ]]; then
+    fail "brew setup unit is not enabled (no target .wants symlink)"
+fi
+
 BRIGHTNESSD=/usr/sbin/asahi-brightnessd
 if [[ ! -x "$BRIGHTNESSD" ]]; then
     fail "asahi-brightnessd binary missing or not executable: $BRIGHTNESSD"

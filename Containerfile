@@ -117,6 +117,11 @@ RUN /usr/libexec/asahi-atomic-niri/update-m1n1-helper.sh gzip-check
 # Refresh m1n1 only after the new tree has booted.
 RUN systemctl enable asahi-atomic-niri-update-m1n1.service
 
+# The brew component ships the tarball and a maintained brew-setup.service
+# that unpacks it to /home/linuxbrew on first boot; uupd updates it after.
+# This COPY must precede the `systemctl enable brew-setup.service` below.
+COPY --from=brew /system_files/ /
+
 # Let uupd stage OS updates without rebooting. Mask the base image's other
 # update timers so they cannot apply an update or reboot on their own.
 RUN systemctl enable greetd.service && \
@@ -132,10 +137,6 @@ RUN systemctl enable greetd.service && \
     systemctl mask bootc-fetch-apply-updates.timer && \
     systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
-
-# The brew component ships the tarball and a maintained brew-setup.service
-# that unpacks it to /home/linuxbrew on first boot; uupd updates it after.
-COPY --from=brew /system_files/ /
 
 RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
 
