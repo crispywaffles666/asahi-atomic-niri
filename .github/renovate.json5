@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "rebaseWhen": "never",
+
+  // Dependabot owns GitHub Actions updates in this repo.
+  "github-actions": {
+    "enabled": false
+  },
+
+  // Only no-content-change update kinds may land unattended; anything that
+  // changes the image (e.g. fedora:44 -> 45) arrives as a manual PR gated by
+  // the pull_request build and validate-image.sh.
+  "packageRules": [
+    {
+      "automerge": true,
+      "matchUpdateTypes": ["pin", "pinDigest"]
+    }
+  ]
+}
