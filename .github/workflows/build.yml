@@ -25,28 +25,34 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write
+      # No id-token: signing uses the COSIGN_PRIVATE_KEY secret, not OIDC.
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
 
       - name: Setup cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
-      - name: Compute date tag
-        id: date
-        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      # The Containerfile's FEDORA_RELEASE ARG is the single source of truth
+      # for the release; the image tags below follow it automatically.
+      - name: Compute date tag and Fedora release
+        id: meta
+        run: |
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "release=$(grep -oP '^ARG FEDORA_RELEASE=\K[0-9]+' Containerfile)" >> "$GITHUB_OUTPUT"
 
       # Build, rechunk, and lint run on PRs too; only the publish tail is gated.
       - name: Build the image locally
         run: |
           podman build \
             --file Containerfile \
-            --tag "localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}" \
+            --tag "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
             .
 
       # Repackage the rootfs into content-defined layers so daily updates only
@@ -57,30 +63,30 @@ jobs:
         run: |
           GRAPHROOT="$(podman info --format '{{.Store.GraphRoot}}')"
           podman run --rm --pull=never --privileged \
-            --mount=type=image,src="localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}",target=/rpm-ostree \
+            --mount=type=image,src="localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}",target=/rpm-ostree \
             --mount=type=bind,src=${GRAPHROOT},target=/run/host-container-storage,rw \
             --mount=type=tmpfs,target=/run/rpm-ostree-storage \
             --entrypoint /usr/bin/rpm-ostree \
-            "localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}" \
+            "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
             compose build-chunked-oci \
             --max-layers 127 \
             --format-version=2 \
             --bootc \
             --rootfs /rpm-ostree \
-            --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}"
+            --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}"
 
       # Revalidate bootc structural requirements after the transformation.
       - name: Lint the rechunked image
         run: |
           podman run --rm \
-            "localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}" \
+            "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
             bootc container lint --fatal-warnings
 
       - name: Tag the registry aliases
         run: |
-          for tag in "44-${{ steps.date.outputs.date }}" latest "${{ github.sha }}"; do
+          for tag in "${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" latest "${{ github.sha }}"; do
             podman tag \
-              "localhost/asahi-atomic-niri:44-${{ steps.date.outputs.date }}" \
+              "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
               "${{ env.IMAGE_NAME }}:${tag}"
           done
 
@@ -100,7 +106,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           podman push --digestfile digest.txt \
-            "${{ env.IMAGE_NAME }}:44-${{ steps.date.outputs.date }}"
+            "${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}"
           podman push "${{ env.IMAGE_NAME }}:latest"
           podman push "${{ env.IMAGE_NAME }}:${{ github.sha }}"
           echo "digest=$(cat digest.txt)" >> "$GITHUB_OUTPUT"
