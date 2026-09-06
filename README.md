@@ -56,10 +56,20 @@ construction; a disposable build stage keeps source trees and build-only
 dependencies out of the final image while retaining upstream licensing
 notices.
 
-User dotfiles and configs (`/etc/skel`): niri (`config.kdl` + `cfg/`), Noctalia,
-bash/zsh/starship, alacritty, ghostty, micro, geany, btop, cava, fastfetch,
-satty, yazi, and the helper scripts `niri-overview-autoclose.sh`,
-`screenshot-notify.sh`, and `smile-paste.sh`.
+User dotfiles and configs (`/etc/skel`): niri (`config.kdl` + `cfg/`), Noctalia
+(`config.toml`, v5 format), bash/zsh/starship, alacritty, ghostty, micro,
+geany, btop, cava, fastfetch, satty, yazi, and the helper scripts
+`niri-overview-autoclose.sh`, `screenshot-notify.sh`, and `smile-paste.sh`.
+
+`/etc/skel` is **starter state for new users only**: it is copied into a home
+directory when the user is created, and existing users never receive updates
+to it automatically (copy pieces manually from `/etc/skel` if you want them).
+Because these files are the factory desktop config, the build validates them
+against the exact package versions going into the image: the niri config is
+parsed by the image's own `niri validate` (including every `cfg/*.kdl`
+include) and the Noctalia config by its `noctalia config validate`, with
+validator warnings about unknown/removed settings treated as fatal so the
+shipped config cannot silently drift as packages update.
 
 ## Distrobox
 
@@ -638,7 +648,9 @@ The build fails closed on checks in `files/scripts/validate-image.sh` (required
 packages present, no GNOME/KDE session, no gaming/x86 packages, Asahi hardware
 packages present, referenced binaries available, distrobox arm64 manifests,
 per-user flatpak bootstrap present, generated GTK 3/4 theme assets, Dracula
-icon index/cache, and exact configured theme names) **and** on Asahi boot-chain hardening checks:
+icon index/cache, exact configured theme names, and the `/etc/skel` starter
+desktop configs parsed by the installed `niri validate` and
+`noctalia config validate`) **and** on Asahi boot-chain hardening checks:
 patched `update-m1n1` (exactly the safe `gzip -nc` invocation) **and** the
 namespaced `ASAHI_ATOMIC_DTBS` override (present exactly once, applied after
 config sourcing and before `DTBS` validation), the deployment-aware DTB/m1n1
@@ -685,6 +697,7 @@ refresh. The final authoritative gate remains `bootc container lint
 │       │   │   └── registries.d/…yaml   # sigstore attachments
 │       │   ├── distrobox/distrobox.ini  # arm64 container presets
 │       │   ├── greetd/config.toml
+│       │   ├── keyd/default.conf        # system-wide mac-style key remapping
 │       │   ├── pki/containers/…pub      # cosign public key
 │       │   ├── profile.d/brew.sh
 │       │   ├── skel/                    # /etc/skel dotfiles

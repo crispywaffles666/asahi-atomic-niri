@@ -294,6 +294,37 @@ if ! HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" niri validate; then
 fi
 rm -rf "$test_home"
 
+# Parse the shipped Noctalia shell config with the exact noctalia build in
+# this image. Validating by directory path keeps the check offline: no
+# running shell, graphical session, or user DBus is required, and the
+# temporary HOME/XDG paths keep the builder's own state out of the check.
+NOCTALIA_SKEL=/etc/skel/.config/noctalia
+if [[ ! -f "$NOCTALIA_SKEL/config.toml" ]]; then
+    fail "skel noctalia config.toml missing: $NOCTALIA_SKEL/config.toml"
+fi
+noctalia_home="$(mktemp -d)"
+mkdir -p "$noctalia_home/.config"
+cp -r "$NOCTALIA_SKEL" "$noctalia_home/.config/noctalia"
+noctalia_log="$noctalia_home/validate.log"
+noctalia_status=0
+HOME="$noctalia_home" XDG_CONFIG_HOME="$noctalia_home/.config" \
+    XDG_STATE_HOME="$noctalia_home/.local/state" \
+    noctalia config validate "$noctalia_home/.config/noctalia" \
+    >"$noctalia_log" 2>&1 || noctalia_status=$?
+# Keep the validator's own output in the build log either way.
+cat "$noctalia_log"
+if [[ "$noctalia_status" -ne 0 ]]; then
+    fail "skel noctalia config failed noctalia config validate (exit $noctalia_status)"
+fi
+# Unknown/removed settings, bad enum values, and migration-needed keys are
+# reported as WARN diagnostics with exit status 0, so exit code alone cannot
+# catch a stale shipped config. Those diagnostics always start with "WARN ";
+# timestamped log lines (e.g. container-environment noise) never do.
+if grep -E '^WARN[[:space:]]' "$noctalia_log"; then
+    fail "skel noctalia config is stale for the installed noctalia (validator warnings above)"
+fi
+rm -rf "$noctalia_home"
+
 # Each helper named by the starter config must ship with it.
 skel_bin=/etc/skel/.local/bin
 for helper_path in $(grep -rhoE '\$HOME/\.local/bin/[A-Za-z0-9._-]+\.sh' "$NIRI_SKEL" | sort -u || true); do
@@ -303,8 +334,9 @@ for helper_path in $(grep -rhoE '\$HOME/\.local/bin/[A-Za-z0-9._-]+\.sh' "$NIRI_
     fi
 done
 
-if [[ ! -r /etc/skel/.config/keyd/default.conf ]]; then
-    fail "skel keyd config missing: /etc/skel/.config/keyd/default.conf"
+# keyd is a system daemon; it reads /etc/keyd, never per-user configs.
+if [[ ! -r /etc/keyd/default.conf ]]; then
+    fail "system keyd config missing: /etc/keyd/default.conf"
 fi
 
 # Ship the starter config without forcing nvim into the image.
