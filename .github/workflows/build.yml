@@ -48,19 +48,22 @@ jobs:
         id: date
         run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
+      # PRs build for validation only; only the default branch may publish.
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Containerfile
           platforms: linux/arm64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:44-${{ steps.date.outputs.date }}
           provenance: false
 
+      # All tags share one manifest digest; signing it once signs every tag.
       - name: Sign the container image
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
@@ -68,8 +71,10 @@ jobs:
           COSIGN_PASSWORD: ""
         run: |
           cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
-            "${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
-            "${{ env.IMAGE_NAME }}:latest"
-          cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
-            "${{ env.IMAGE_NAME }}:44-${{ steps.date.outputs.date }}"
+            "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+      - name: Verify the signature
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          cosign verify --key cosign.pub \
+            "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
