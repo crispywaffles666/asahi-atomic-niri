@@ -43,6 +43,10 @@ if [[ ! -x /usr/sbin/asahi-brightnessd ]]; then
     exit 1
 fi
 
+# Keep the upstream MIT notice alongside the binary, as with the themes.
+install -Dm0644 /tmp/asahi-brightnessd-src/LICENSE \
+    /usr/share/licenses/asahi-brightnessd/LICENSE
+
 command -v strip >/dev/null 2>&1 && strip /usr/sbin/asahi-brightnessd
 
 rm -rf /tmp/asahi-brightnessd-src /tmp/asahi-brightnessd.tar.gz

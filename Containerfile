@@ -9,6 +9,30 @@ COPY files/scripts/install-themes.sh /tmp/install-themes.sh
 RUN chmod +x /tmp/install-themes.sh && \
     /tmp/install-themes.sh
 
+# gcc/make/patch exist only to compile asahi-brightnessd; keep them out of the
+# final image the same way the theme stage keeps sassc out.
+FROM registry.fedoraproject.org/fedora:44 AS brightnessd-builder
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+    curl gcc gzip make patch tar && \
+    dnf clean all
+
+COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonly.patch
+COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
+RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
+    /tmp/install-asahi-brightnessd.sh
+
+# The Homebrew installer needs gcc and git; stage it where they are disposable.
+FROM registry.fedoraproject.org/fedora:44 AS brew-builder
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+    bash coreutils curl file gcc git procps-ng tar zstd && \
+    dnf clean all
+
+COPY files/scripts/install-brew.sh /tmp/install-brew.sh
+RUN chmod +x /tmp/install-brew.sh && \
+    /tmp/install-brew.sh
+
 FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 
 # Brave cannot unpack through the base image's dangling /opt link. A real /opt
@@ -36,7 +60,6 @@ RUN dnf install -y \
     fastfetch \
     pulseaudio-utils \
     brave-origin \
-    gcc make patch \
     tailscale \
     uupd \
     keyd \
@@ -70,6 +93,12 @@ COPY --from=theme-builder /usr/share/themes/Graphite-purple-Dark-dracula /usr/sh
 COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/dracula-icons-main
 COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
 COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
+
+# The brightness daemon and staged Homebrew tree come from disposable builder
+# stages, so no compiler or installer tooling enters this image.
+COPY --from=brightnessd-builder /usr/sbin/asahi-brightnessd /usr/sbin/asahi-brightnessd
+COPY --from=brightnessd-builder /usr/share/licenses/asahi-brightnessd /usr/share/licenses/asahi-brightnessd
+COPY --from=brew-builder /usr/share/homebrew/ /usr/share/homebrew/
 
 COPY files/system/ /
 
@@ -108,25 +137,13 @@ RUN systemctl enable greetd.service && \
     systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
 
-# brew-setup copies this read-only tree to /var on first boot; uupd updates it.
-COPY files/scripts/install-brew.sh /tmp/install-brew.sh
-RUN chmod +x /tmp/install-brew.sh && \
-    /tmp/install-brew.sh && \
-    rm /tmp/install-brew.sh
-
+# brew-setup copies the staged read-only tree to /var on first boot; uupd updates it.
 RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
 
 COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh
 RUN chmod +x /tmp/install-overpass-nerd.sh && \
     /tmp/install-overpass-nerd.sh && \
     rm /tmp/install-overpass-nerd.sh
-
-# Fedora has no asahi-brightnessd package, so build the pinned source.
-COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonly.patch
-COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
-RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
-    /tmp/install-asahi-brightnessd.sh && \
-    rm /tmp/install-asahi-brightnessd.sh
 
 # These base-image overrides name GNOME parts that this image removes.
 RUN rm -f /usr/share/glib-2.0/schemas/00_org.gnome.shell.gschema.override \

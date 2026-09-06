@@ -126,10 +126,12 @@ for package in "${REQUIRED_ASAHI_PACKAGES[@]}"; do
     fi
 done
 
-# Theme build dependencies and sources stay in the disposable builder stage.
-if rpm -q --quiet sassc; then
-    fail "theme build-only package leaked into the final image: sassc"
-fi
+# Theme and compiler tooling lives in disposable builder stages only.
+for package in sassc gcc make patch; do
+    if rpm -q --quiet "$package"; then
+        fail "build-only package leaked into the final image: $package"
+    fi
+done
 
 GRAPHITE_THEME=/usr/share/themes/Graphite-purple-Dark-dracula
 GRAPHITE_FILES=(
@@ -157,6 +159,8 @@ DRACULA_ICONS=/usr/share/icons/dracula-icons-main
     || fail "Graphite upstream license is missing"
 [[ -s /usr/share/licenses/dracula-icons/README.md ]] \
     || fail "Dracula Icons upstream licensing notice is missing"
+[[ -s /usr/share/licenses/asahi-brightnessd/LICENSE ]] \
+    || fail "asahi-brightnessd upstream license is missing"
 
 for gtk_settings in /etc/skel/.config/gtk-{3,4}.0/settings.ini; do
     grep -Fxq 'gtk-theme-name=Graphite-purple-Dark-dracula' "$gtk_settings" \

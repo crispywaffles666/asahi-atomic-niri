@@ -1,0 +1,9 @@
+# Dependabot covers GitHub Actions bumps; Renovate (renovate.json5) covers
+# Containerfile base-image tags. Keep the scopes separate so the two bots
+# never open competing PRs for the same file.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
