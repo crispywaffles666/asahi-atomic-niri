@@ -1,0 +1,35 @@
+name: Renovate
+
+# Self-hosted Renovate: no Mend app, account, or license key. Reads its config
+# from .github/renovate.json5 (base-image tags; github-actions is left to
+# dependabot there).
+#
+# NOTE: PRs opened with GITHUB_TOKEN do not trigger other workflows (GitHub's
+# recursion guard), so a Renovate PR gets its validation build after merge via
+# the push-to-main build, or by closing and reopening the PR. A bad base-tag
+# bump fails that build loudly while bootc keeps the previous deployment.
+on:
+  schedule:
+    - cron: "23 4 * * 1" # Mondays 04:23 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: renovate
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Run Renovate
+        uses: renovatebot/github-action@v46.2.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
