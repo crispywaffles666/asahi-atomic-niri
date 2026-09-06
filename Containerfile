@@ -1,3 +1,9 @@
+# Universal Blue's maintained Homebrew component: a pre-built tarball,
+# first-boot setup service, and shell integration, published for both
+# amd64 and aarch64. Renovate bumps the pinned digest (.github/renovate.json5).
+ARG BREW_IMAGE=ghcr.io/ublue-os/brew:latest@sha256:d52b3f578f01623636aff534291b0bd8ff0a0244ef225bf51aecb5fa05a137af
+FROM ${BREW_IMAGE} AS brew
+
 FROM registry.fedoraproject.org/fedora:44 AS theme-builder
 
 # Theme generation and archive tooling stay in this disposable stage.
@@ -21,17 +27,6 @@ COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonl
 COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
 RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
     /tmp/install-asahi-brightnessd.sh
-
-# The Homebrew installer needs gcc and git; stage it where they are disposable.
-FROM registry.fedoraproject.org/fedora:44 AS brew-builder
-
-RUN dnf install -y --setopt=install_weak_deps=False \
-    bash coreutils curl file gcc git procps-ng tar zstd && \
-    dnf clean all
-
-COPY files/scripts/install-brew.sh /tmp/install-brew.sh
-RUN chmod +x /tmp/install-brew.sh && \
-    /tmp/install-brew.sh
 
 FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
 
@@ -64,6 +59,8 @@ RUN dnf install -y \
     uupd \
     keyd \
     distrobox \
+    # brew-setup.service unpacks the brew tarball with `tar --zstd` at boot.
+    zstd \
     # The first-login app setup and uupd both need Flatpak on the host.
     flatpak \
     # The base image lacks desktop tools for disks, print, Bluetooth, and files.
@@ -94,11 +91,10 @@ COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/d
 COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
 COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
 
-# The brightness daemon and staged Homebrew tree come from disposable builder
-# stages, so no compiler or installer tooling enters this image.
+# The brightness daemon comes from a disposable builder stage, so no compiler
+# or installer tooling enters this image.
 COPY --from=brightnessd-builder /usr/sbin/asahi-brightnessd /usr/sbin/asahi-brightnessd
 COPY --from=brightnessd-builder /usr/share/licenses/asahi-brightnessd /usr/share/licenses/asahi-brightnessd
-COPY --from=brew-builder /usr/share/homebrew/ /usr/share/homebrew/
 
 COPY files/system/ /
 
@@ -137,7 +133,10 @@ RUN systemctl enable greetd.service && \
     systemctl mask rpm-ostreed-automatic.timer && \
     systemctl set-default graphical.target
 
-# brew-setup copies the staged read-only tree to /var on first boot; uupd updates it.
+# The brew component ships the tarball and a maintained brew-setup.service
+# that unpacks it to /home/linuxbrew on first boot; uupd updates it after.
+COPY --from=brew /system_files/ /
+
 RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
 
 COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh

@@ -132,9 +132,11 @@ sensor cannot break the image.
 
 Three convenience features are layered on top of the base:
 
-- **Homebrew** — staged image-owned at build time and copied into
-  `/var/home/linuxbrew` on first boot by `brew-setup.service`. Managed as the
-  default user (UID 1000); brew analytics are disabled.
+- **Homebrew** — supplied by Universal Blue's digest-pinned
+  [`ublue-os/brew`](https://github.com/ublue-os/brew) OCI component, which is
+  published for both amd64 and aarch64. Its `brew-setup.service` unpacks a
+  pre-built Homebrew tarball into `/home/linuxbrew` on first boot; uupd keeps
+  it updated afterwards. Brew analytics are disabled.
 - **Tailscale** — installed from Tailscale's official RPM repository with
   `tailscaled.service` enabled. Run `sudo tailscale up` to join your tailnet.
 - **keyd** — installed from the `alternateved/keyd` COPR with `keyd.service`
@@ -160,8 +162,8 @@ Three convenience features are layered on top of the base:
   Asahi boot chain (m1n1/U-Boot refresh) consumes it — so the menu-hiding
   success state is intentionally not maintained.
 
-Homebrew, tailscale, and the flathub system remote assume the machine's primary
-user is UID 1000 (the Fedora/Asahi default).
+The upstream brew component sets Homebrew up for the machine's primary user
+(UID 1000, the Fedora/Asahi default).
 
 ## Image signing
 
@@ -684,7 +686,6 @@ refresh. The final authoritative gate remains `bootc container lint
 │   ├── scripts/
 │   │   ├── install-overpass-nerd.sh  # fonts
 │   │   ├── install-themes.sh         # checksum-verified pinned GTK/icon sources
-│   │   ├── install-brew.sh           # stage homebrew at build time
 │   │   ├── install-asahi-brightnessd.sh  # build/install pinned upstream ALS daemon (kbd-only patch applied)
 │   │   ├── patch-update-m1n1.sh      # fail-closed Atomic patch (gzip -nc + ASAHI_ATOMIC_DTBS override)
 │   │   └── validate-image.sh         # build-time assertions + boot-safety checks
@@ -699,7 +700,6 @@ refresh. The final authoritative gate remains `bootc container lint
 │       │   ├── greetd/config.toml
 │       │   ├── keyd/default.conf        # system-wide mac-style key remapping
 │       │   ├── pki/containers/…pub      # cosign public key
-│       │   ├── profile.d/brew.sh
 │       │   ├── skel/                    # /etc/skel dotfiles
 │       │   ├── systemd/logind.conf.d/
 │       │   └── uupd/config.json
@@ -709,9 +709,9 @@ refresh. The final authoritative gate remains `bootc container lint
 │           │   │   ├── system/
 │           │   │   │   ├── asahi-atomic-niri-update-m1n1.service  # deploy-aware refresh
 │           │   │   │   ├── asahi-brightnessd.service  # ALS auto-brightness daemon (kbd only)
-│           │   │   │   ├── brew-setup.service, flathub-setup.service
+│           │   │   │   ├── flathub-setup.service  # (brew-setup.service comes from the ublue-os/brew OCI component)
 │           │   │   │   └── user/config-flatpaks.service  # per-user Flatpaks
-│           │   │   └── tmpfiles.d/tuigreet.conf, homebrew.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf
+│           │   │   └── tmpfiles.d/tuigreet.conf, tailscale.conf, config-flatpaks.conf, zz-asahi-atomic-niri.conf
 │           │   └── libexec/
 │           │       ├── asahi-atomic-niri/update-m1n1-helper.sh  # DTB/m1n1 helper
 │           │       └── asahi-niri/config-flatpaks.sh

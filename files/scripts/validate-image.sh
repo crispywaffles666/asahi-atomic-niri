@@ -256,8 +256,14 @@ for d in "${GVFS_DAEMONS[@]}"; do
     [[ -x "$d" ]] || fail "required gvfs daemon not found: $d"
 done
 
-if [[ ! -x /usr/share/homebrew/home/linuxbrew/.linuxbrew/bin/brew ]]; then
-    fail "staged homebrew binary not found in image"
+if [[ ! -f /usr/share/homebrew.tar.zst ]]; then
+    fail "homebrew tarball from the ublue-os/brew component not found in image"
+fi
+if [[ ! -f /usr/lib/systemd/system/brew-setup.service ]]; then
+    fail "brew-setup.service from the ublue-os/brew component not found in image"
+fi
+if ! command -v zstd >/dev/null 2>&1; then
+    fail "zstd missing; brew-setup.service cannot unpack the homebrew tarball"
 fi
 
 # Allow only known Arm images; Universal Blue toolbox images target PCs.

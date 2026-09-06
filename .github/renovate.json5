@@ -8,6 +8,18 @@
     "enabled": false
   },
 
+  // Track the digest-pinned Universal Blue brew component in the Containerfile.
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Containerfile$/"],
+      "matchStrings": [
+        "ARG BREW_IMAGE=(?<depName>[a-z0-9./-]+):(?<currentValue>[a-zA-Z0-9.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+
   // Only no-content-change update kinds may land unattended; anything that
   // changes the image (e.g. fedora:44 -> 45) arrives as a manual PR gated by
   // the pull_request build and validate-image.sh.
