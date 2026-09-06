@@ -51,7 +51,7 @@ jobs:
       # PRs build for validation only; only the default branch may publish.
       - name: Build and push image
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile
