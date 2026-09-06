@@ -88,8 +88,12 @@ jobs:
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
         run: |
+          # Write to the docker config path: podman falls back to reading it,
+          # and cosign reads nothing else.
+          mkdir -p "$HOME/.docker"
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io \
-            --username "${{ github.actor }}" --password-stdin
+            --username "${{ github.actor }}" --password-stdin \
+            --authfile "$HOME/.docker/config.json"
 
       - name: Push all tags
         id: push
