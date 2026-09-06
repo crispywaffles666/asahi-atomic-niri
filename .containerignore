@@ -1,0 +1,9 @@
+# Podman only needs the Containerfile and files/ as build context.
+.git
+.github
+docs
+*.md
+LICENSE
+cosign.pub
+.gitignore
+.containerignore

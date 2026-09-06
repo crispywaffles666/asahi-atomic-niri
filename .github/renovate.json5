@@ -21,12 +21,23 @@
   ],
 
   // Only no-content-change update kinds may land unattended; anything that
-  // changes the image (e.g. fedora:44 -> 45) arrives as a manual PR gated by
-  // the pull_request build and validate-image.sh.
+  // changes the image (e.g. base-atomic:44 -> 45) arrives as a manual PR gated
+  // by the pull_request build and validate-image.sh.
   "packageRules": [
     {
       "automerge": true,
       "matchUpdateTypes": ["pin", "pinDigest"]
+    },
+    {
+      // The Containerfile's FEDORA_RELEASE ARG feeds both the disposable
+      // builder stages (this dependency) and the final Asahi base. The
+      // base-atomic bump is authoritative and moves the shared ARG; never
+      // bump the standalone fedora build image on its own, or the compiled
+      // asahi-brightnessd would be built against a newer userspace than the
+      // final image ships.
+      "matchDatasources": ["docker"],
+      "matchDepNames": ["registry.fedoraproject.org/fedora"],
+      "enabled": false
     }
   ]
 }

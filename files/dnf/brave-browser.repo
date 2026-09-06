@@ -1,0 +1,8 @@
+# Vendored from https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+# so builds do not fetch a mutable repo definition from the network.
+[brave-browser]
+name=Brave Browser
+enabled=1
+gpgcheck=1
+gpgkey=https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+baseurl=https://brave-browser-rpm-release.s3.brave.com/$basearch

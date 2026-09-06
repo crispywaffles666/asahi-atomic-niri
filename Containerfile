@@ -1,15 +1,27 @@
+# One Fedora release drives every stage: the disposable builders must match
+# the final Asahi base image's userspace (asahi-brightnessd is a compiled
+# binary copied into it). Renovate moves this ARG through the Asahi base
+# dependency; standalone fedora build-image bumps are disabled in
+# .github/renovate.json5 so the builders can never outrun the base.
+ARG FEDORA_RELEASE=44
+
 # Universal Blue's maintained Homebrew component: a pre-built tarball,
 # first-boot setup service, and shell integration, published for both
 # amd64 and aarch64. Renovate bumps the pinned digest (.github/renovate.json5).
 ARG BREW_IMAGE=ghcr.io/ublue-os/brew:latest@sha256:d52b3f578f01623636aff534291b0bd8ff0a0244ef225bf51aecb5fa05a137af
 FROM ${BREW_IMAGE} AS brew
 
-FROM registry.fedoraproject.org/fedora:44 AS theme-builder
+# Union of every build-only tool the artifact stages need. None of it crosses
+# a COPY --from boundary into the final image; validate-image.sh rejects
+# sassc/gcc/make/patch if they ever do.
+FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE} AS builder-base
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+    bash coreutils curl gcc gzip make patch sassc sed tar gtk-update-icon-cache && \
+    dnf clean all
 
 # Theme generation and archive tooling stay in this disposable stage.
-RUN dnf install -y --setopt=install_weak_deps=False \
-    bash coreutils curl gzip sassc sed tar gtk-update-icon-cache && \
-    dnf clean all
+FROM builder-base AS theme-builder
 
 COPY files/scripts/install-themes.sh /tmp/install-themes.sh
 RUN chmod +x /tmp/install-themes.sh && \
@@ -17,28 +29,32 @@ RUN chmod +x /tmp/install-themes.sh && \
 
 # gcc/make/patch exist only to compile asahi-brightnessd; keep them out of the
 # final image the same way the theme stage keeps sassc out.
-FROM registry.fedoraproject.org/fedora:44 AS brightnessd-builder
-
-RUN dnf install -y --setopt=install_weak_deps=False \
-    curl gcc gzip make patch tar && \
-    dnf clean all
+FROM builder-base AS brightnessd-builder
 
 COPY files/patches/asahi-brightnessd-kbdonly.patch /tmp/asahi-brightnessd-kbdonly.patch
 COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.sh
 RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
     /tmp/install-asahi-brightnessd.sh
 
-FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:44
+FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:${FEDORA_RELEASE}
 
 # Brave cannot unpack through the base image's dangling /opt link. A real /opt
 # also keeps browser files out of /var, as bootc lint requires.
 RUN rm -rf /opt
 
+# Every repo definition is vendored under files/dnf; no mutable remote .repo
+# files are fetched during the build.
 COPY files/dnf/*.repo /etc/yum.repos.d/
 
-RUN dnf config-manager addrepo --from-repofile=https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo && \
-    dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo && \
-    dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-44.noarch.rpm
+# The RPM Fusion release RPM follows the same pin-and-verify pattern as the
+# builder stages' source tarballs. The known SHA is for the FEDORA_RELEASE
+# build above; bump both together.
+ARG FEDORA_RELEASE
+RUN curl -fSL --retry 3 --output /tmp/rpmfusion-free-release.rpm \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_RELEASE}.noarch.rpm" && \
+    echo "8af2dbb02e3a72f0961ec79cf1ea3f350719cb830b0f99f59e939389feb34b1c  /tmp/rpmfusion-free-release.rpm" | sha256sum --check - && \
+    dnf install -y /tmp/rpmfusion-free-release.rpm && \
+    rm /tmp/rpmfusion-free-release.rpm
 
 RUN dnf install -y \
     niri xwayland-satellite greetd tuigreet alacritty \
