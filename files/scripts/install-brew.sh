@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Based on BlueBuild's Apache-2.0 brew module. Pin the installer, turn off its
-# updates and metrics, and let uupd handle updates.
+# Based on BlueBuild's Apache-2.0 brew module. Pin and hash-check the
+# installer, turn off its updates and metrics, and let uupd handle updates.
 for dep in gcc zstd; do
     command -v "$dep" >/dev/null 2>&1 || {
         echo "ERROR: missing '$dep'; install it in the Containerfile first" >&2
@@ -11,11 +11,13 @@ for dep in gcc zstd; do
 done
 
 INSTALLER_COMMIT="ca0130bd52235f2fcb2bf23cfdda004bc5d250c1"
+INSTALLER_SHA256="8ff338091a5e10bb5fc040b38316648110f42feff057ecf9feaab51fd0a13ef9"
 
 echo "Downloading Homebrew installer (pinned $INSTALLER_COMMIT)..."
 curl -fLsS --retry 5 --create-dirs \
     "https://raw.githubusercontent.com/Homebrew/install/${INSTALLER_COMMIT}/install.sh" \
     -o /tmp/brew-install
+echo "${INSTALLER_SHA256}  /tmp/brew-install" | sha256sum -c -
 chmod +x /tmp/brew-install
 
 # Brew's installer needs a container mark and a working /home link. tmpfiles
