@@ -2,3 +2,7 @@ cosign.key
 build/
 *.ociarchive
 *.tar
+
+__pycache__/
+*.pyc
+/rechunk-output/

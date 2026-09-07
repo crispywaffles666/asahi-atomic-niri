@@ -10,4 +10,7 @@ repo_gpgcheck=1
 gpgkey=https://repos.fyralabs.com/terra$releasever/key.asc
 enabled=1
 enabled_metadata=1
+# Keep Terra out of the Asahi hardware stack and source uupd from its dedicated
+# Universal Blue repository. Include the desktop tools' completion subpackages.
+includepkgs=ghostty ghostty-* satty satty-* starship starship-* yazi yazi-*
 metadata_expire=4h

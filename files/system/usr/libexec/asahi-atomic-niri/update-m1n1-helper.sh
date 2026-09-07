@@ -1,173 +1,173 @@
 #!/usr/bin/bash
-# Use the booted tree's device files, never the stale /boot/dtb link. Running
-# after boot ties `uname -r` to that tree. ASAHI_ATOMIC_DTBS then wins over old
-# settings in /etc without letting them pick another tree.
+# Refresh the shared ESP when its last successfully written payload differs
+# from the booted tree. Historical deployment markers cannot describe an ESP.
 set -euo pipefail
 
-# Tests can point these paths at temp files.
 MARKER_ROOT=${MARKER_ROOT:-/var/lib/asahi-atomic-niri}
 MODULE_ROOT=${MODULE_ROOT:-/usr/lib/modules}
 UPDATE_M1N1=${UPDATE_M1N1:-/usr/bin/update-m1n1}
 
 log() { echo "asahi-atomic-niri-update-m1n1: $*" >&2; }
+fail() { log "ERROR: $*"; exit 1; }
 
-fail() {
-    echo "ERROR: $*" >&2
-    exit 1
-}
-
-# Use the tree hash as its ID; two trees may share a kernel release.
 deployment_id() {
-    local id="" karg=""
-    karg="$(tr ' ' '\n' </proc/cmdline | sed -n 's/^ostree=//p')"
-    if [[ -n "$karg" ]]; then
-        # Path shape: /ostree/boot.N/<stateroot>/<checksum>[/serial]
-        karg="${karg#/ostree/boot.}"
-        karg="${karg#*/}"
-        id="$(printf '%s' "$karg" | cut -d/ -f2)"
-        if [[ -n "$id" ]]; then
-            printf '%s\n' "$id"
-            return 0
-        fi
-    fi
-
-    if command -v bootc >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-        id="$(bootc status --json 2>/dev/null \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); b=d.get("booted") or {}; print(b.get("checksum",""))' \
-        )"
-        if [[ -n "$id" ]]; then
-            printf '%s\n' "$id"
-            return 0
-        fi
-    fi
-
-    fail "unable to determine the booted deployment identifier"
+    # The ostree= kernel argument contains a boot checksum shared by trees.
+    # Ask bootc for the actual booted OSTree commit instead.
+    bootc status --json | jq -er '
+        .status.booted.ostree.checksum |
+        select(type == "string" and test("^[a-f0-9]{64}$"))
+    ' || fail "unable to determine the booted OSTree deployment"
 }
 
 find_dtbs() {
-    local kver="" path=""
-    kver="$(uname -r)"
-    if [[ -z "$kver" ]]; then
-        fail "uname -r returned an empty kernel release"
-    fi
-
-    # dracut-asahi uses dtb, but some Asahi packages use dtbs.
-    path="${MODULE_ROOT}/${kver}/dtb"
-    if [[ -d "$path" ]] && [[ -n "$(ls "$path"/apple/t6*.dtb "$path"/apple/t81*.dtb 2>/dev/null)" ]]; then
-        printf '%s\n' "$path"
-        return 0
-    fi
-
-    path="${MODULE_ROOT}/${kver}/dtbs"
-    if [[ -d "$path" ]] && [[ -n "$(ls "$path"/apple/t6*.dtb "$path"/apple/t81*.dtb 2>/dev/null)" ]]; then
-        printf '%s\n' "$path"
-        return 0
-    fi
-
-    fail "cannot find DTBs for the booted kernel '$kver' under /usr/lib/modules"
+    local kver path
+    kver=$(uname -r)
+    [[ -n "$kver" ]] || fail "uname -r returned an empty kernel release"
+    for path in "$MODULE_ROOT/$kver/dtb" "$MODULE_ROOT/$kver/dtbs"; do
+        if [[ -d "$path" ]] && compgen -G "$path/apple/t6*.dtb" >/dev/null; then
+            printf '%s\n' "$path"
+            return
+        fi
+        if [[ -d "$path" ]] && compgen -G "$path/apple/t81*.dtb" >/dev/null; then
+            printf '%s\n' "$path"
+            return
+        fi
+    done
+    fail "cannot find DTBs for booted kernel '$kver' under $MODULE_ROOT"
 }
 
-marker_for() {
-    # /var spans OSTree trees, so key each mark by tree ID.
-    printf '%s/updates/%s\n' "$MARKER_ROOT" "$(printf '%s' "$1" | tr '/' '_')"
-}
-
-is_done() {
-    local marker
-    marker="$(marker_for "$1")"
-    [[ -f "$marker" ]]
-}
-
-record_done() {
-    local marker
-    marker="$(marker_for "$1")"
-    mkdir -p "$(dirname "$marker")" || fail "cannot create marker dir for deployment"
-    printf 'refreshed at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$marker"
-    log "recorded m1n1 refresh success for deployment $1"
-}
-
-check_gzip() {
-    [[ -x "$UPDATE_M1N1" ]] || fail "'$UPDATE_M1N1' not found or not executable"
-
-    local uboot=""
-    # Tests may point this at a copied U-Boot file.
-    if [[ -n "${ASAHI_UBOOT:-}" && -f "$ASAHI_UBOOT" ]]; then
-        uboot="$ASAHI_UBOOT"
-    elif [[ -f /usr/share/uboot/apple_m1/u-boot-nodtb.bin ]]; then
-        uboot=/usr/share/uboot/apple_m1/u-boot-nodtb.bin
-    elif [[ -f /usr/lib/asahi-boot/u-boot-nodtb.bin ]]; then
-        uboot=/usr/lib/asahi-boot/u-boot-nodtb.bin
-    else
-        fail "cannot locate the Asahi U-Boot binary for the gzip -nc test"
+resolve_inputs() {
+    local dtb=$1 input_file
+    [[ -x "$UPDATE_M1N1" ]] || fail "'$UPDATE_M1N1' is not executable"
+    input_file=$(mktemp)
+    # The patched updater reports its effective paths after loading Fedora's
+    # /etc configuration and defaults, but before any /run or ESP writes.
+    if ! ASAHI_ATOMIC_DTBS="$dtb" ASAHI_ATOMIC_INSPECT=1 \
+        "$UPDATE_M1N1" >"$input_file"; then
+        rm -f "$input_file"
+        fail "cannot inspect update-m1n1 inputs"
     fi
-
-    local tmp=""
-    tmp="$(mktemp)"
-    # The default keeps `set -u` from failing after this local goes out of scope.
-    trap '[[ -n "${tmp:-}" ]] && rm -f "$tmp"' RETURN
-    # -n drops the timestamp that OSTree sets to zero and gzip rejects.
-    if ! gzip -nc "$uboot" >"$tmp"; then
-        fail "gzip -nc failed against '$uboot' (would also abort update-m1n1)"
-    fi
-    if ! gzip -t "$tmp" 2>/dev/null; then
-        fail "gzip -nc output failed integrity check"
-    fi
-    log "gzip -nc validated against '$uboot' (decompresses cleanly; no ESP write)"
+    mapfile -d '' -t payload_inputs <"$input_file"
+    rm -f "$input_file"
+    [[ ${#payload_inputs[@]} -eq 5 ]] \
+        || fail "updater disabled or missing the Atomic inspection hook; no success recorded"
+    [[ -s ${payload_inputs[0]} && -s ${payload_inputs[1]} ]] \
+        || fail "m1n1 or U-Boot input is missing/empty"
+    [[ ${payload_inputs[3]} == "$dtb" ]] || fail "updater resolved another tree's DTBs"
 }
+
+payload_hash() (
+    local dtb=$1 file
+    export LC_ALL=C
+    shopt -s nullglob
+    local dtbs=("$dtb"/apple/t6*.dtb "$dtb"/apple/t81*.dtb)
+    ((${#dtbs[@]})) || fail "no Apple DTBs in $dtb"
+    {
+        printf 'asahi-atomic-payload-v1\n'
+        # Include updater changes as well as every binary/config input.
+        for file in "$UPDATE_M1N1" "${payload_inputs[0]}" "${payload_inputs[1]}"; do
+            sha256sum <"$file"
+        done
+        for file in "${dtbs[@]}"; do
+            printf '%s\n' "${file##*/}"
+            sha256sum <"$file"
+        done
+        if [[ -f ${payload_inputs[2]} ]]; then
+            sha256sum <"${payload_inputs[2]}"
+        else
+            printf 'no-m1n1-config\n'
+        fi
+        printf 'target=%s\n' "${payload_inputs[4]}"
+    } | sha256sum | cut -d ' ' -f1
+)
+
+is_current() {
+    [[ -r "$MARKER_ROOT/current-payload" ]] \
+        && [[ $(<"$MARKER_ROOT/current-payload") == "$1" ]]
+}
+
+record_current() (
+    local marker_tmp
+    marker_tmp=$(mktemp "$MARKER_ROOT/.current-payload.XXXXXX")
+    trap 'rm -f "$marker_tmp"' EXIT
+    printf '%s\n' "$1" >"$marker_tmp"
+    sync -f "$marker_tmp"
+    mv -f "$marker_tmp" "$MARKER_ROOT/current-payload"
+    sync -f "$MARKER_ROOT"
+)
+
+check_gzip() (
+    local uboot=${ASAHI_UBOOT:-} tmp
+    if [[ -z "$uboot" ]]; then
+        for uboot in /usr/share/uboot/apple_m1/u-boot-nodtb.bin /usr/lib/asahi-boot/u-boot-nodtb.bin; do
+            [[ -s "$uboot" ]] && break
+        done
+    fi
+    [[ -s "$uboot" ]] || fail "cannot locate the Asahi U-Boot binary"
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+    gzip -nc "$uboot" >"$tmp" && gzip -t "$tmp" \
+        || fail "gzip -nc failed for '$uboot'"
+    log "gzip -nc validated (no ESP write)"
+)
 
 check() {
-    check_gzip
-    local dtb id
-    dtb="$(find_dtbs)"
-    id="$(deployment_id)"
-    log "resolved deployment DTB dir: $dtb"
-    log "booted deployment id:         $id"
-    if is_done "$id"; then
-        log "this deployment has already been refreshed; nothing to do"
+    local dtb id fingerprint
+    dtb=$(find_dtbs)
+    id=$(deployment_id)
+    resolve_inputs "$dtb"
+    fingerprint=$(payload_hash "$dtb")
+    ASAHI_UBOOT=${payload_inputs[1]} check_gzip
+    log "booted deployment: $id; DTBs: $dtb; payload: $fingerprint"
+    if is_current "$fingerprint"; then
+        log "payload matches the last successful ESP refresh"
     else
-        log "this deployment has NOT yet been refreshed"
+        log "payload needs an ESP refresh"
     fi
 }
 
-gzip_check() {
-    check_gzip
-}
-
-refresh() {
-    local dtb id
-    dtb="$(find_dtbs)"
-    id="$(deployment_id)"
-
-    if is_done "$id"; then
-        log "deployment $id already refreshed; skipping"
-        return 0
+refresh() (
+    local dtb id fingerprint
+    mkdir -p "$MARKER_ROOT"
+    exec 9>"$MARKER_ROOT/refresh.lock"
+    flock -x 9
+    dtb=$(find_dtbs)
+    id=$(deployment_id)
+    resolve_inputs "$dtb"
+    fingerprint=$(payload_hash "$dtb")
+    if is_current "$fingerprint"; then
+        log "payload $fingerprint already current (deployment $id); skipping"
+        return
     fi
+    ASAHI_UBOOT=${payload_inputs[1]} check_gzip
 
-    # Stop before touching the ESP if gzip cannot read this U-Boot file.
-    check_gzip
-
-    [[ -x "$UPDATE_M1N1" ]] || fail "'$UPDATE_M1N1' not found or not executable"
-
-    # The patched script reads this after /etc. Drop plain DTBS so /etc cannot win.
-    unset DTBS || true
+    # Failed updates may partially touch the ESP. Invalidate the old claim
+    # before writing, so returning to the old tree also retries after failure.
+    rm -f "$MARKER_ROOT/current-payload"
+    sync -f "$MARKER_ROOT"
+    unset DTBS ASAHI_ATOMIC_INSPECT
     export ASAHI_ATOMIC_DTBS="$dtb"
-    log "refreshing m1n1/U-Boot/DTBs from $dtb (deployment $id)"
-    if ! "$UPDATE_M1N1"; then
-        fail "update-m1n1 failed for deployment $id; not marking as refreshed"
-    fi
+    log "refreshing payload $fingerprint for deployment $id"
+    "$UPDATE_M1N1" || fail "update-m1n1 failed; no current payload recorded"
 
-    record_done "$id"
-    log "m1n1/U-Boot/DTB refresh complete; a reboot is required for the new stage-2 payload to take effect"
+    resolve_inputs "$dtb"
+    [[ $(payload_hash "$dtb") == "$fingerprint" ]] \
+        || fail "payload inputs changed during update; no current payload recorded"
+    record_current "$fingerprint"
+    log "refresh complete; reboot to use the new stage-2 payload"
+)
+
+main() {
+    case "${1:-}" in
+        deployment-id) deployment_id ;;
+        resolve-dtb) find_dtbs ;;
+        gzip-check) check_gzip ;;
+        check) check ;;
+        refresh) refresh ;;
+        *) echo "usage: $0 {deployment-id|resolve-dtb|gzip-check|check|refresh}" >&2; return 2 ;;
+    esac
 }
 
-case "${1:-}" in
-    deployment-id) deployment_id ;;
-    resolve-dtb)   find_dtbs ;;
-    gzip-check)    gzip_check ;;
-    check)         check ;;
-    refresh)       refresh ;;
-    *)
-        echo "usage: $0 {deployment-id|resolve-dtb|gzip-check|check|refresh}" >&2
-        exit 2
-        ;;
-esac
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

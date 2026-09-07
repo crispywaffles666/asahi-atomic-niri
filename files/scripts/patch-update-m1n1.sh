@@ -5,7 +5,7 @@
 # See https://github.com/AsahiLinux/asahi-scripts/issues/71.
 set -euo pipefail
 
-SCRIPT="/usr/bin/update-m1n1"
+SCRIPT="${UPDATE_M1N1_SCRIPT:-/usr/bin/update-m1n1}"
 
 OLD_GZIP='gzip -c "$U_BOOT" >>"${TARGET}.new"'
 NEW_GZIP='gzip -nc "$U_BOOT" >>"${TARGET}.new"'
@@ -27,6 +27,12 @@ if [[ ! -r "$SCRIPT" ]]; then
     echo "ERROR: $SCRIPT is missing; cannot patch update-m1n1." >&2
     exit 1
 fi
+
+# Inspect effective paths before the stock updater writes to /run or the ESP.
+INSPECT_BLOCK='if [ "${ASAHI_ATOMIC_INSPECT:-}" = 1 ]; then
+    printf "%s\0" "$M1N1" "$U_BOOT" "$CONFIG" "$DTBS" "$TARGET"
+    exit 0
+fi'
 
 count="$(grep -Fxc -- "$OLD_GZIP" "$SCRIPT" || true)"
 if [[ "$count" -ne 1 ]]; then
@@ -68,6 +74,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
     if [[ "$override_done" -eq 0 && "$line" == "$DTBS_CHECK_LINE" ]]; then
         printf '%s\n' "$OVERRIDE_BLOCK"
+        printf '%s\n' "$INSPECT_BLOCK"
         override_done=1
     fi
     printf '%s\n' "$line"

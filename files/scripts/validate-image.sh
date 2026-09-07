@@ -225,6 +225,9 @@ REQUIRED_BINARIES=(
     ffprobe
     ffmpegthumbnailer
     gzip
+    flock
+    sha256sum
+    sync
     update-m1n1
 )
 
@@ -266,18 +269,19 @@ if ! command -v zstd >/dev/null 2>&1; then
     fail "zstd missing; brew-setup.service cannot unpack the homebrew tarball"
 fi
 
-# Allow only known Arm images; Universal Blue toolbox images target PCs.
+# CI verifies live manifests for linux/arm64. Check the installed presets here
+# without requiring network access inside image validation.
 DISTROBOX_INI=/etc/distrobox/distrobox.ini
 if [[ ! -r $DISTROBOX_INI ]]; then
     fail "distrobox manifest not found: $DISTROBOX_INI"
 fi
-if grep -Eq '^\s*image\s*=\s*(ghcr\.io/ublue-os|docker\.io/ublue|.*toolbox)' "$DISTROBOX_INI"; then
-    fail "distrobox manifest must not reference Universal Blue x86 toolbox images"
-fi
 for img in 'docker.io/library/fedora' 'docker.io/library/ubuntu' \
-           'docker.io/library/debian' 'docker.io/library/archlinux'; do
+           'docker.io/library/debian'; do
     grep -q "image=${img}" "$DISTROBOX_INI" || fail "distrobox manifest missing arm64 preset: $img"
 done
+if grep -q 'image=docker.io/library/archlinux' "$DISTROBOX_INI"; then
+    fail "the official Arch image does not support this Arm preset"
+fi
 
 if [[ ! -x /usr/libexec/asahi-niri/config-flatpaks.sh ]]; then
     fail "per-user flatpak bootstrap script not found / not executable"
@@ -561,6 +565,27 @@ printf 'M1N1PAYLOAD\n'  > "$test_root/m1n1.bin"
 printf 'UBOOTNODTB\n'   > "$test_root/u-boot-nodtb.bin"
 
 test_out="$test_root/boot.bin"
+# Inspection must use exactly the same effective inputs without starting writes.
+if ! ( cd "$test_root" && \
+       ASAHI_ATOMIC_TMP="$test_root" \
+       test_default="$test_root/fake-default" \
+       M1N1="$test_root/m1n1.bin" \
+       U_BOOT="$test_root/u-boot-nodtb.bin" \
+       CONFIG="$test_root/custom.conf" \
+       TARGET="$test_out" \
+       ASAHI_ATOMIC_DTBS="$test_root" ASAHI_ATOMIC_INSPECT=1 \
+       sh "$test_script" >"$test_root/inputs" ); then
+    fail "patched updater inspection failed"
+fi
+mapfile -d '' -t inspected <"$test_root/inputs"
+[[ ${#inspected[@]} -eq 5 \
+   && ${inspected[0]} == "$test_root/m1n1.bin" \
+   && ${inspected[1]} == "$test_root/u-boot-nodtb.bin" \
+   && ${inspected[2]} == "$test_root/custom.conf" \
+   && ${inspected[3]} == "$test_root" \
+   && ${inspected[4]} == "$test_out" ]] || fail "inspection returned unexpected payload inputs"
+[[ ! -e $test_out && ! -e $test_root/m1n1.conf ]] || fail "inspection wrote mutable boot files"
+
 if ! ( cd "$test_root" && \
        ASAHI_ATOMIC_TMP="$test_root" \
        test_default="$test_root/fake-default" \

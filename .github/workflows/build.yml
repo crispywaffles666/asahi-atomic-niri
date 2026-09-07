@@ -7,25 +7,31 @@ on:
   pull_request:
     paths-ignore: ["**.md"]
   workflow_dispatch:
+    inputs:
+      benchmark_rechunk:
+        description: Compare previous-build and fresh rechunk plans on the same rootfs
+        type: boolean
+        default: false
   schedule:
     - cron: "00 03 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
-  cancel-in-progress: true
+  # New main builds queue: never automatically cancel signing/promotion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE_NAME: ghcr.io/crispywaffles666/asahi-atomic-niri
+  RAW_IMAGE: localhost/asahi-atomic-niri:raw
+  CHUNKED_IMAGE: localhost/asahi-atomic-niri:chunked
 
 jobs:
   build:
     name: Build aarch64 bootc image
-    # Package hooks fail under qemu-user, so build on Arm.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
-      # No id-token: signing uses the COSIGN_PRIVATE_KEY secret, not OIDC.
 
     steps:
       - name: Checkout
@@ -38,91 +44,75 @@ jobs:
 
       - name: Setup cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.5.2 # Legacy signatures; later versions auto-select unrelated OCI bundles
 
-      # The Containerfile's FEDORA_RELEASE ARG is the single source of truth
-      # for the release; the image tags below follow it automatically.
-      - name: Compute date tag and Fedora release
-        id: meta
+      - name: Regression tests and native Distrobox platform checks
         run: |
-          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          echo "release=$(grep -oP '^ARG FEDORA_RELEASE=\K[0-9]+' Containerfile)" >> "$GITHUB_OUTPUT"
+          python3 -m unittest discover -s tests -v
+          python3 scripts/check-distrobox-platforms.py
 
-      # Build, rechunk, and lint run on PRs too; only the publish tail is gated.
-      - name: Build the image locally
-        run: |
-          podman build \
-            --file Containerfile \
-            --tag "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
-            .
+      - name: Resolve and verify build inputs
+        id: inputs
+        run: bash scripts/resolve-build-inputs.sh
 
-      # Repackage the rootfs into content-defined layers so daily updates only
-      # pull what changed. Command line follows ublue-os/image-template's
-      # ostree-rechunk recipe verbatim, running the rpm-ostree shipped inside
-      # the image itself.
-      - name: Rechunk the image
-        run: |
-          GRAPHROOT="$(podman info --format '{{.Store.GraphRoot}}')"
-          podman run --rm --pull=never --privileged \
-            --mount=type=image,src="localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}",target=/rpm-ostree \
-            --mount=type=bind,src=${GRAPHROOT},target=/run/host-container-storage,rw \
-            --mount=type=tmpfs,target=/run/rpm-ostree-storage \
-            --entrypoint /usr/bin/rpm-ostree \
-            "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
-            compose build-chunked-oci \
-            --max-layers 127 \
-            --format-version=2 \
-            --bootc \
-            --rootfs /rpm-ostree \
-            --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}"
-
-      # Revalidate bootc structural requirements after the transformation.
-      - name: Lint the rechunked image
-        run: |
-          podman run --rm \
-            "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
-            bootc container lint --fatal-warnings
-
-      - name: Tag the registry aliases
-        run: |
-          for tag in "${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" latest "${{ github.sha }}"; do
-            podman tag \
-              "localhost/asahi-atomic-niri:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}" \
-              "${{ env.IMAGE_NAME }}:${tag}"
-          done
-
-      # PRs stop here; only the default branch may publish.
       - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Write to the docker config path: podman falls back to reading it,
-          # and cosign reads nothing else.
           mkdir -p "$HOME/.docker"
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io \
-            --username "${{ github.actor }}" --password-stdin \
+          printf '%s' "$REGISTRY_TOKEN" | podman login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin \
             --authfile "$HOME/.docker/config.json"
 
-      - name: Push all tags
-        id: push
-        if: github.event_name != 'pull_request'
+      - name: Build pinned artifacts with selective registry caching
+        env:
+          PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          BASE_IMAGE: ${{ steps.inputs.outputs.base }}
+          BREW_IMAGE: ${{ steps.inputs.outputs.brew }}
+          BUILDER_IMAGE: ${{ steps.inputs.outputs.builder }}
         run: |
-          podman push --digestfile digest.txt \
-            "${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.release }}-${{ steps.meta.outputs.date }}"
-          podman push "${{ env.IMAGE_NAME }}:latest"
-          podman push "${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          echo "digest=$(cat digest.txt)" >> "$GITHUB_OUTPUT"
+          cache_opts=(--cache-from "${IMAGE_NAME}-buildcache")
+          if [[ $PUBLISH == true ]]; then
+            cache_opts+=(--cache-to "${IMAGE_NAME}-buildcache")
+          fi
+          podman build --layers --target artifacts \
+            "${cache_opts[@]}" \
+            --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            --build-arg "BREW_IMAGE=$BREW_IMAGE" \
+            --build-arg "BUILDER_IMAGE=$BUILDER_IMAGE" \
+            --tag localhost/asahi-artifacts:build .
 
-      # All tags share one manifest digest; signing it once signs every tag.
-      - name: Sign the container image
+      - name: Build the image locally
+        env:
+          BASE_IMAGE: ${{ steps.inputs.outputs.base }}
+          BREW_IMAGE: ${{ steps.inputs.outputs.brew }}
+          BUILDER_IMAGE: ${{ steps.inputs.outputs.builder }}
+        run: |
+          # Reuse local artifacts, but do not import/export final-image layers.
+          # Its mutable package transactions run afresh on every CI runner.
+          podman build --layers --file Containerfile \
+            --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            --build-arg "BREW_IMAGE=$BREW_IMAGE" \
+            --build-arg "BUILDER_IMAGE=$BUILDER_IMAGE" \
+            --tag "$RAW_IMAGE" .
+
+      - name: Rechunk and measure update size
+        env:
+          PREVIOUS_IMAGE: ${{ steps.inputs.outputs.previous }}
+          # PRs exercise both plans; dispatch permits a controlled comparison.
+          BENCHMARK_RECHUNK: ${{ github.event_name == 'pull_request' || inputs.benchmark_rechunk == true }}
+        run: bash scripts/rechunk-image.sh
+
+      - name: Lint the rechunked image
+        run: podman run --rm "$CHUNKED_IMAGE" bootc container lint --fatal-warnings
+
+      # Only a unique, unadvertised build tag moves before signature verification.
+      - name: Push, sign, verify, then promote
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           COSIGN_PASSWORD: ""
-        run: |
-          cosign sign --key env://COSIGN_PRIVATE_KEY --yes \
-            "${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
-
-      - name: Verify the signature
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: |
-          cosign verify --key cosign.pub \
-            "${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}"
+          FEDORA_RELEASE: ${{ steps.inputs.outputs.release }}
+        run: bash scripts/publish-image.sh
