@@ -129,6 +129,15 @@ cat "$FIXTURE/m1n1.bin" "$ASAHI_ATOMIC_DTBS/apple/t6000.dtb" > "$FIXTURE/esp.bin
         self.run_helper(success=False)
         self.assertEqual(self.calls(), 0)
 
+    def test_unreadable_hash_input_fails_before_updater(self):
+        self.script("sha256sum", '''
+[[ $(readlink /proc/self/fd/0) != "$FIXTURE/m1n1.bin" ]] || exit 1
+exec /usr/bin/sha256sum "$@"
+''')
+        self.run_helper(success=False)
+        self.assertEqual(self.calls(), 0)
+        self.assertFalse((self.root / "state/current-payload").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

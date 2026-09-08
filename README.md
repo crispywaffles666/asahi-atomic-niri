@@ -661,13 +661,20 @@ Only pinned theme/font/brightness-daemon artifact stages use the persistent
 registry cache; the final image's mutable RPM transactions always run afresh.
 The hardware package NEVRA set is compared before/after `--allowerasing`.
 
-Rechunking uses the previous **signed** image's plan via `--previous-build`,
-with a distinct raw-image tag. CI reports compressed layer bytes absent from
-the previous image, reused layers, and rechunk time in the run summary. PRs
-compare that plan against a fresh plan using the **same rootfs**; manual
-dispatches can opt in with `benchmark_rechunk`. The exported candidate OCI
-manifest is copied unchanged during publishing, so measurements use its real
-compressed digests/sizes. No saving is assumed before comparing the results.
+Rechunking uses the previous **signed** image's plan via `--previous-build`
+when it has `ostree.components` layer annotations. The old storage/push path
+discarded those annotations: many content layers were reused, but the packing
+plan itself was not. CI now exports directly to OCI, checks that the plan is
+preserved, and publishes that manifest unchanged. This also avoids an extra
+unpack/recompression round trip; linting imports a separate disposable copy.
+
+CI reports compressed layer bytes absent from the previous image, reused
+layers, and rechunk time. With a usable previous plan, PRs compare it with a
+fresh plan using the **same rootfs**; dispatches can opt in with
+`benchmark_rechunk`. Without one, CI explicitly reports the limitation and
+tests consuming the newly generated plan locally. That same-rootfs smoke test
+does **not** measure savings between daily updates. A historical comparison
+becomes possible after the first metadata-preserving image is published.
 
 To build locally:
 

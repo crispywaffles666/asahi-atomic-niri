@@ -66,14 +66,14 @@ payload_hash() (
         printf 'asahi-atomic-payload-v1\n'
         # Include updater changes as well as every binary/config input.
         for file in "$UPDATE_M1N1" "${payload_inputs[0]}" "${payload_inputs[1]}"; do
-            sha256sum <"$file"
+            sha256sum <"$file" || exit 1
         done
         for file in "${dtbs[@]}"; do
             printf '%s\n' "${file##*/}"
-            sha256sum <"$file"
+            sha256sum <"$file" || exit 1
         done
         if [[ -f ${payload_inputs[2]} ]]; then
-            sha256sum <"${payload_inputs[2]}"
+            sha256sum <"${payload_inputs[2]}" || exit 1
         else
             printf 'no-m1n1-config\n'
         fi
@@ -106,8 +106,9 @@ check_gzip() (
     [[ -s "$uboot" ]] || fail "cannot locate the Asahi U-Boot binary"
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
-    gzip -nc "$uboot" >"$tmp" && gzip -t "$tmp" \
-        || fail "gzip -nc failed for '$uboot'"
+    if ! gzip -nc "$uboot" >"$tmp" || ! gzip -t "$tmp"; then
+        fail "gzip -nc failed for '$uboot'"
+    fi
     log "gzip -nc validated (no ESP write)"
 )
 
@@ -149,6 +150,12 @@ refresh() (
     export ASAHI_ATOMIC_DTBS="$dtb"
     log "refreshing payload $fingerprint for deployment $id"
     "$UPDATE_M1N1" || fail "update-m1n1 failed; no current payload recorded"
+
+    # The default updater unmounts/flushes its ESP. An explicit custom TARGET
+    # stays mounted, so flush that filesystem before making the marker durable.
+    if [[ -n ${payload_inputs[4]} ]]; then
+        sync -f "${payload_inputs[4]}"
+    fi
 
     resolve_inputs "$dtb"
     [[ $(payload_hash "$dtb") == "$fingerprint" ]] \

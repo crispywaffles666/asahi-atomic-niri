@@ -18,6 +18,15 @@ def module(name):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_layers_without_component_annotations_are_not_a_plan(self):
+        has_plan = module("measure-layers").has_chunk_plan
+        manifest = {"layers": [{}, {"annotations": {"ostree.components": "kernel"}},
+                                {"annotations": {"ostree.components": ""}}]}
+        self.assertTrue(has_plan(manifest))
+        del manifest["layers"][1]["annotations"]
+        self.assertFalse(has_plan(manifest))
+        self.assertFalse(has_plan({"layers": []}))
+
     def test_amd64_and_attestation_do_not_mean_arm64(self):
         supports = module("check-distrobox-platforms").supports_platform
         manifest = {"manifests": [{"platform": {"os": "linux", "architecture": "amd64"}},
