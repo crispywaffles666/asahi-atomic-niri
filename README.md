@@ -676,6 +676,15 @@ tests consuming the newly generated plan locally. That same-rootfs smoke test
 does **not** measure savings between daily updates. A historical comparison
 becomes possible after the first metadata-preserving image is published.
 
+Migration caveat: changing the export/compression path can change every blob
+digest even where file contents are unchanged. The [native PR validation run](https://github.com/crispywaffles666/asahi-atomic-niri/actions/runs/34185964153)
+measured 2,873,788,704 new compressed bytes (about 2.68 GiB), with no layers
+reused from the legacy published image. Budget for a full-image download on
+that transition. Its same-rootfs plan smoke test reused all 128 layers with
+zero new compressed bytes; this confirms plan preservation, not daily-update
+savings. Candidate export took 161 seconds and the smoke-test export 188
+seconds. Warm-cache build-time savings have not yet been measured.
+
 To build locally:
 
 ```bash
