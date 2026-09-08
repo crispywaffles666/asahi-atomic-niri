@@ -25,7 +25,8 @@ rechunk() {
     # Keep the authoritative OCI layout. A containers-storage -> podman push
     # round trip discarded ostree.components, making future plans unusable.
     # Direct OCI export also avoids unpacking and recompressing before publish.
-    skopeo inspect --raw "oci:rechunk-output/$name:latest" >"rechunk-output/$name.json"
+    # rpm-ostree creates a single untagged descriptor in this layout.
+    skopeo inspect --raw "oci:rechunk-output/$name" >"rechunk-output/$name.json"
     has_plan "rechunk-output/$name.json" || {
         echo 'ERROR: exported image lost its reusable chunk plan' >&2
         exit 1
@@ -55,7 +56,7 @@ if [[ ${BENCHMARK_RECHUNK:-false} == true ]]; then
         # Legacy published images cannot supply a valid before/after benchmark.
         # Prove the newly preserved plan can be consumed, without claiming an
         # update saving from a same-rootfs round trip.
-        rechunk roundtrip oci:/output/candidate:latest
+        rechunk roundtrip oci:/output/candidate
         python3 scripts/measure-layers.py rechunk-output/candidate.json \
             rechunk-output/roundtrip.json | tee rechunk-output/roundtrip.jsonl
     fi
@@ -68,7 +69,7 @@ fi
 
 # Import a disposable copy only for linting; publishing reads the original OCI
 # layout, never the copy reconstructed by the container runtime.
-candidate_id=$(podman pull --quiet oci:rechunk-output/candidate:latest)
+candidate_id=$(podman pull --quiet oci:rechunk-output/candidate)
 podman tag "$candidate_id" "$CHUNKED_IMAGE"
 
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then

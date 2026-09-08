@@ -7,7 +7,7 @@ set -euo pipefail
 build_tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 digest="sha256:$(sha256sum rechunk-output/candidate.json | cut -d ' ' -f1)"
 reference="$IMAGE_NAME@$digest"
-skopeo copy --preserve-digests oci:rechunk-output/candidate:latest "docker://$IMAGE_NAME:$build_tag"
+skopeo copy --preserve-digests oci:rechunk-output/candidate "docker://$IMAGE_NAME:$build_tag"
 [[ $(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE_NAME:$build_tag") == "$digest" ]]
 cosign sign --key env://COSIGN_PRIVATE_KEY --yes "$reference"
 cosign verify --key cosign.pub "$reference"
