@@ -13,6 +13,8 @@ rechunk() {
     # rpm-ostree treats a nonexistent OCI directory as an error while probing
     # --output for a baseline. Its archive transport handles an absent/empty
     # baseline; use that explicit sentinel when deliberately starting fresh.
+    # Validated in the native PR build when legacy published images had no
+    # usable plan: https://github.com/crispywaffles666/asahi-atomic-niri/actions/runs/34185964153
     local opts=(--previous-build "${previous:-oci-archive:/dev/null}")
     podman run --rm --pull=never --privileged \
         --mount="type=image,src=$RAW_IMAGE,target=/rpm-ostree" \

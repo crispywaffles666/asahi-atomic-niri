@@ -12,7 +12,12 @@ fail() { log "ERROR: $*"; exit 1; }
 
 deployment_id() {
     # The ostree= kernel argument contains a boot checksum shared by trees.
-    # Ask bootc for the actual booted OSTree commit instead.
+    # Ask bootc for the actual booted OSTree commit instead. This path must
+    # match the installed bootc's status schema, which has moved between
+    # versions; verify after bootc upgrades on-device:
+    #   bootc status --json | jq -r .status.booted.ostree.checksum
+    # A schema change fails closed here (service error in the journal, no
+    # marker and no ESP write), so check the unit after OS updates.
     bootc status --json | jq -er '
         .status.booted.ostree.checksum |
         select(type == "string" and test("^[a-f0-9]{64}$"))

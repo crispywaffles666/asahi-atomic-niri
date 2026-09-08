@@ -4,6 +4,9 @@ release=$(sed -n 's/^ARG FEDORA_RELEASE=//p' Containerfile)
 [[ $release =~ ^[0-9]+$ ]]
 base=$(bash scripts/verify-image.sh quay.io/fedora-asahi-remix-atomic-desktops/base-atomic "$release" keys/fedora-asahi.pub)
 brew_arg=$(sed -n 's/^ARG BREW_IMAGE=//p' Containerfile)
+# ${brew_arg##*@} extracts the digest only because ARG BREW_IMAGE always
+# carries one; renovate's customManager regex in .github/renovate.json5
+# requires the @sha256: suffix. Keep both in sync if that ARG shape changes.
 brew=$(bash scripts/verify-image.sh ghcr.io/ublue-os/brew "${brew_arg##*@}" keys/ublue-os.pub)
 
 # Fedora's disposable builder is resolved by digest; it does not use the

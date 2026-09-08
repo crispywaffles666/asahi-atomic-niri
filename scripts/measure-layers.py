@@ -16,8 +16,9 @@ def measure(previous, current):
     known = {layer["digest"] for layer in previous["layers"]}
     # Clients fetch each content-addressed blob once, even if repeated.
     layers = {layer["digest"]: layer["size"] for layer in current["layers"]}
+    # Count distinct reused digests too, matching the deduplicated byte sums.
     return {"layers": len(current["layers"]),
-            "reused_layers": sum(layer["digest"] in known for layer in current["layers"]),
+            "reused_layers": sum(digest in known for digest in layers),
             "compressed_bytes": sum(layers.values()),
             "new_compressed_bytes": sum(size for digest, size in layers.items() if digest not in known)}
 

@@ -42,8 +42,14 @@ jobs:
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
 
+      # Pin the cosign binary, not just the installer: resolve-build-inputs.sh
+      # verifies legacy static-key signatures from Universal Blue and Asahi,
+      # and newer cosign defaults changed bundle selection for those. Match
+      # bazzite-niri's pin; review together when bumping cosign.
       - name: Setup cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.5.2 # Legacy signatures; later versions auto-select unrelated OCI bundles
 
       - name: Regression tests and native Distrobox platform checks
         run: |
