@@ -10,8 +10,10 @@ has_plan() {
 
 rechunk() {
     local name=$1 previous=${2:-} start=$SECONDS
-    local opts=()
-    [[ -z $previous ]] || opts+=(--previous-build "$previous")
+    # rpm-ostree treats a nonexistent OCI directory as an error while probing
+    # --output for a baseline. Its archive transport handles an absent/empty
+    # baseline; use that explicit sentinel when deliberately starting fresh.
+    local opts=(--previous-build "${previous:-oci-archive:/dev/null}")
     podman run --rm --pull=never --privileged \
         --mount="type=image,src=$RAW_IMAGE,target=/rpm-ostree" \
         --mount="type=bind,src=$output_dir,target=/output,rw" \
