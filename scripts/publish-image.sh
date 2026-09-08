@@ -9,8 +9,13 @@ digest="sha256:$(sha256sum rechunk-output/candidate.json | cut -d ' ' -f1)"
 reference="$IMAGE_NAME@$digest"
 skopeo copy --preserve-digests oci:rechunk-output/candidate "docker://$IMAGE_NAME:$build_tag"
 [[ $(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE_NAME:$build_tag") == "$digest" ]]
-cosign sign --key env://COSIGN_PRIVATE_KEY --yes "$reference"
-cosign verify --key cosign.pub "$reference"
+# Sign in the legacy simple-signing format: the in-image sigstoreSigned policy
+# (containers/image, bootc, rpm-ostree) cannot read cosign 3's OCI-referrer
+# bundles. Same flags upstream Universal Blue uses for its own signing.
+# containers/container-libs#388, coreos/rpm-ostree#5509
+cosign sign -y --new-bundle-format=false --use-signing-config=false \
+    --key env://COSIGN_PRIVATE_KEY "$reference"
+cosign verify --new-bundle-format=false --key cosign.pub "$reference"
 
 # Latest is last. Automatic workflow cancellation is disabled on main. Manual
 # cancellation is still possible, but can only leave aliases on signed digests.
