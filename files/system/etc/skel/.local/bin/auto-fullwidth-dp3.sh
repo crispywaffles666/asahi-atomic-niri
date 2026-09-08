@@ -1,55 +1,60 @@
 #!/bin/bash
+# Resize moved columns according to physical-monitor serials, not DP names.
+set -uo pipefail
 
-declare -A window_outputs
+declare -A window_outputs=()
+WIDTH_CONFIG=${NIRI_OUTPUT_WIDTHS:-${XDG_CONFIG_HOME:-$HOME/.config}/niri/output-widths.json}
 
-get_output_for_workspace() {
-    niri msg --json workspaces | jq -r --argjson workspace_id "$1" \
-        '.[] | select(.id == $workspace_id) | .output // empty'
+parse_events() {
+    jq --unbuffered -r '
+      if .WindowOpenedOrChanged then
+        .WindowOpenedOrChanged.window |
+        select(.id != null and .workspace_id != null) |
+        ["window", .id, .workspace_id, .is_focused, .is_floating] | @tsv
+      elif .WindowClosed then ["closed", .WindowClosed.id] | @tsv
+      else empty end'
 }
 
-get_serial_for_output() {
-    niri msg --json outputs | jq -r --arg output "$1" \
-        '.[$output].serial // empty'
+handle_event() {
+    local event=$1 id=$2 workspace=${3:-} focused=${4:-} floating=${5:-}
+    local output previous serial width
+    [[ $id =~ ^[0-9]+$ ]] || return 0
+    if [[ $event == closed ]]; then
+        unset 'window_outputs[$id]'
+        return 0
+    fi
+    [[ $event == window && $focused == true && $floating == false ]] || return 0
+    output=$(niri msg --json workspaces | jq -r --argjson id "$workspace" \
+        '.[] | select(.id == $id) | .output // empty') || return 0
+    [[ -n $output ]] || return 0
+    previous=${window_outputs[$id]:-}
+    window_outputs[$id]=$output
+    [[ -n $previous && $previous != "$output" ]] || return 0
+    serial=$(niri msg --json outputs | jq -r --arg output "$output" \
+        '.[$output].serial // empty') || return 0
+    width=$(jq -r --arg serial "$serial" '.[$serial] // empty' "$WIDTH_CONFIG") || return 0
+    [[ $width =~ ^[0-9]+%$ ]] || return 0
+
+    # The action targets the focused column. Do not resize a different window
+    # if focus changed while we queried the workspace/output information.
+    niri msg --json focused-window | jq -e --argjson id "$id" \
+        '.id == $id and .is_floating == false' >/dev/null || return 0
+    niri msg action set-column-width "$width"
 }
 
-while true; do
-    while read -r line; do
-        if echo "$line" | grep -q '"WindowOpenedOrChanged"'; then
-            window_id=$(echo "$line" | grep -o '"id":[0-9]*' | head -1 | grep -o '[0-9]*')
-            window_ws=$(echo "$line" | grep -o '"workspace_id":[0-9]*' | head -1 | grep -o '[0-9]*')
-            is_focused=$(echo "$line" | grep -o '"is_focused":true')
-            is_floating=$(echo "$line" | grep -o '"is_floating":true')
+main() {
+    jq -e 'type == "object" and all(.[]; type == "string" and test("^[0-9]+%$"))' \
+        "$WIDTH_CONFIG" >/dev/null || return 1
+    while true; do
+        # A reconnect starts a fresh observation history.
+        window_outputs=()
+        while IFS=$'\t' read -r event id workspace focused floating; do
+            handle_event "$event" "$id" "$workspace" "$focused" "$floating"
+        done < <(niri msg --json event-stream | parse_events)
+        sleep 1
+    done
+}
 
-            if [ -n "$window_ws" ] && [ -n "$is_focused" ] && [ -n "$window_id" ] && [ -z "$is_floating" ]; then
-                output=$(get_output_for_workspace "$window_ws")
-                last_output="${window_outputs[$window_id]}"
-                window_outputs[$window_id]="$output"
-
-                # Skip if no previous output (new window) or monitor hasn't changed
-                [ -z "$last_output" ] || [ "$last_output" = "$output" ] && continue
-
-                # Connector names can change after resume (for example DP-4 to
-                # DP-5), so identify the physical monitor by its EDID serial.
-                monitor_serial=$(get_serial_for_output "$output")
-                [ -z "$monitor_serial" ] && continue
-
-                sleep 0.1
-                if [ "$monitor_serial" = "CN41254B6B" ]; then
-                    niri msg action set-column-width "100%"
-                elif [ "$monitor_serial" = "CN41170Z70" ]; then
-                    niri msg action set-column-width "50%"
-                    sleep 0.02
-                    niri msg action focus-column-left
-                    sleep 0.02
-                    niri msg action focus-column-right
-                fi
-            fi
-        fi
-
-        if echo "$line" | grep -q '"WindowClosed"'; then
-            closed_id=$(echo "$line" | grep -o '[0-9]*$')
-            unset window_outputs[$closed_id] 2>/dev/null
-        fi
-    done < <(niri msg --json event-stream)
-    sleep 1
-done
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

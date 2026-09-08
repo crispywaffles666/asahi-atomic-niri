@@ -29,7 +29,8 @@ tailscale, uupd
 
 **Containerized dev environments:** distrobox (with podman), plus a shared
 `/etc/distrobox/distrobox.ini` assemble manifest with arm64-compatible Fedora,
-Ubuntu, Debian, and Arch presets.
+Ubuntu and Debian presets. CI checks their live manifests for `linux/arm64`;
+the official Arch container is deliberately omitted because it lacks that platform.
 
 **Flatpak runtime:** flatpak + a system Flathub remote (added at first boot).
 Per-user, first-login installs of **Flatseal**, **Warehouse**, and **Smile**.
@@ -541,6 +542,15 @@ journalctl -b \
 The image's deployment-aware m1n1 service should rebuild `boot.bin` using the
 DTBs belonging to the currently booted deployment.
 
+The helper hashes the effective m1n1, U-Boot, DTBs, updater, and configuration
+inputs. `/var/lib/asahi-atomic-niri/current-payload` describes only the last
+successful write, not every deployment ever booted: A → B → A refreshes A again.
+Different deployments with identical payload inputs do not need a rewrite.
+The deployment ID comes from `bootc status --json`, not the `ostree=` boot
+checksum. Failed writes invalidate the marker so the next attempt retries.
+Old per-deployment markers are ignored. If you modify/repair the ESP outside
+this helper, remove `current-payload` and rerun the service to resynchronize it.
+
 If it succeeds, reboot again:
 
 ```sh
@@ -638,6 +648,43 @@ another working Asahi install available.
 CI builds natively on an `ubuntu-24.04-arm` runner (no emulation), pushes to
 `ghcr.io/crispywaffles666/asahi-atomic-niri`, and signs with cosign.
 
+Publishing and registry-cache writes are restricted to `main`. A unique
+`build-RUN_ID-ATTEMPT` tag is pushed first; its immutable digest is signed and
+verified before the date/SHA aliases and finally `latest` are promoted.
+Automatic cancellation is disabled for main runs. Even a manual cancellation
+between alias updates leaves all promoted aliases pointing to signed digests.
+
+CI verifies the Asahi base and Homebrew component against vendored upstream
+keys, then builds from those exact digests. The disposable Fedora builder is
+also resolved by digest (it is not verified with those unrelated cosign keys).
+Only pinned theme/font/brightness-daemon artifact stages use the persistent
+registry cache; the final image's mutable RPM transactions always run afresh.
+The hardware package NEVRA set is compared before/after `--allowerasing`.
+
+Rechunking uses the previous **signed** image's plan via `--previous-build`
+when it has `ostree.components` layer annotations. The old storage/push path
+discarded those annotations: many content layers were reused, but the packing
+plan itself was not. CI now exports directly to OCI, checks that the plan is
+preserved, and publishes that manifest unchanged. This also avoids an extra
+unpack/recompression round trip; linting imports a separate disposable copy.
+
+CI reports compressed layer bytes absent from the previous image, reused
+layers, and rechunk time. With a usable previous plan, PRs compare it with a
+fresh plan using the **same rootfs**; dispatches can opt in with
+`benchmark_rechunk`. Without one, CI explicitly reports the limitation and
+tests consuming the newly generated plan locally. That same-rootfs smoke test
+does **not** measure savings between daily updates. A historical comparison
+becomes possible after the first metadata-preserving image is published.
+
+Migration caveat: changing the export/compression path can change every blob
+digest even where file contents are unchanged. The [native PR validation run](https://github.com/crispywaffles666/asahi-atomic-niri/actions/runs/34185964153)
+measured 2,873,788,704 new compressed bytes (about 2.68 GiB), with no layers
+reused from the legacy published image. Budget for a full-image download on
+that transition. Its same-rootfs plan smoke test reused all 128 layers with
+zero new compressed bytes; this confirms plan preservation, not daily-update
+savings. Candidate export took 161 seconds and the smoke-test export 188
+seconds. Warm-cache build-time savings have not yet been measured.
+
 To build locally:
 
 ```bash
@@ -648,7 +695,7 @@ podman build --platform linux/arm64 -t asahi-atomic-niri .
 
 The build fails closed on checks in `files/scripts/validate-image.sh` (required
 packages present, no GNOME/KDE session, no gaming/x86 packages, Asahi hardware
-packages present, referenced binaries available, distrobox arm64 manifests,
+packages present, referenced binaries available, distrobox presets,
 per-user flatpak bootstrap present, generated GTK 3/4 theme assets, Dracula
 icon index/cache, exact configured theme names, and the `/etc/skel` starter
 desktop configs parsed by the installed `niri validate` and
@@ -671,6 +718,17 @@ non-destructive behavioral conflict test proving that a stale config-provided
 `DTBS` cannot override the deployment-aware path during an `update-m1n1`
 refresh. The final authoritative gate remains `bootc container lint
 --fatal-warnings`.
+
+CI additionally runs `python3 -m unittest discover -s tests -v` and live ARM64
+manifest checks in `scripts/check-distrobox-platforms.py`. Tests cover payload
+rollback/failure behavior, JSON window events, publication ordering and guards,
+hardware-package protection, and compressed layer accounting.
+
+`auto-fullwidth-dp3.sh` is Asahi-only; the Bazzite repository does not ship it.
+Monitor serials and widths live in `~/.config/niri/output-widths.json` (seeded
+from `/etc/skel`). Use `niri msg --json outputs` to find your serials; `{}`
+disables automatic resizing. Existing users must copy the updated helper and
+this new configuration explicitly; image updates do not overwrite home files.
 
 ## Repository layout
 

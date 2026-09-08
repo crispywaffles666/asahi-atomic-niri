@@ -4,6 +4,9 @@
 # dependency; standalone fedora build-image bumps are disabled in
 # .github/renovate.json5 so the builders can never outrun the base.
 ARG FEDORA_RELEASE=44
+# CI passes the already-verified upstream digest, never re-resolves its tag.
+ARG BASE_IMAGE=quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:${FEDORA_RELEASE}
+ARG BUILDER_IMAGE=registry.fedoraproject.org/fedora:${FEDORA_RELEASE}
 
 # Universal Blue's maintained Homebrew component: a pre-built tarball,
 # first-boot setup service, and shell integration, published for both
@@ -14,10 +17,10 @@ FROM ${BREW_IMAGE} AS brew
 # Union of every build-only tool the artifact stages need. None of it crosses
 # a COPY --from boundary into the final image; validate-image.sh rejects
 # sassc/gcc/make/patch if they ever do.
-FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE} AS builder-base
+FROM ${BUILDER_IMAGE} AS builder-base
 
 RUN dnf install -y --setopt=install_weak_deps=False \
-    bash coreutils curl gcc gzip make patch sassc sed tar gtk-update-icon-cache && \
+    bash coreutils curl gcc gzip make patch sassc sed tar gtk-update-icon-cache zstd fontconfig && \
     dnf clean all
 
 # Theme generation and archive tooling stay in this disposable stage.
@@ -36,7 +39,22 @@ COPY files/scripts/install-asahi-brightnessd.sh /tmp/install-asahi-brightnessd.s
 RUN chmod +x /tmp/install-asahi-brightnessd.sh && \
     /tmp/install-asahi-brightnessd.sh
 
-FROM quay.io/fedora-asahi-remix-atomic-desktops/base-atomic:${FEDORA_RELEASE}
+FROM builder-base AS font-builder
+COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh
+RUN bash /tmp/install-overpass-nerd.sh
+
+# CI persists only these pinned artifact stages in the registry build cache.
+# Mutable RPM transactions in the final image always run on the fresh runner.
+FROM scratch AS artifacts
+COPY --from=theme-builder /usr/share/themes/Graphite-purple-Dark-dracula /usr/share/themes/Graphite-purple-Dark-dracula
+COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/dracula-icons-main
+COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
+COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
+COPY --from=brightnessd-builder /usr/sbin/asahi-brightnessd /usr/sbin/asahi-brightnessd
+COPY --from=brightnessd-builder /usr/share/licenses/asahi-brightnessd /usr/share/licenses/asahi-brightnessd
+COPY --from=font-builder /usr/share/fonts/OTF/overpass-nerd /usr/share/fonts/OTF/overpass-nerd
+
+FROM ${BASE_IMAGE}
 
 # Brave cannot unpack through the base image's dangling /opt link. A real /opt
 # also keeps browser files out of /var, as bootc lint requires.
@@ -56,7 +74,9 @@ RUN curl -fSL --retry 3 --output /tmp/rpmfusion-free-release.rpm \
     dnf install -y /tmp/rpmfusion-free-release.rpm && \
     rm /tmp/rpmfusion-free-release.rpm
 
-RUN dnf install -y \
+COPY files/scripts/hardware-package-set.sh /tmp/hardware-package-set.sh
+RUN bash /tmp/hardware-package-set.sh snapshot /tmp/asahi-hardware.before && \
+    dnf install -y \
     niri xwayland-satellite greetd tuigreet alacritty \
     xdg-desktop-portal-gnome xdg-desktop-portal-gtk gnome-keyring gnome-keyring-pam nautilus \
     noctalia ghostty satty \
@@ -96,21 +116,16 @@ RUN dnf install -y \
     gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free \
     --allowerasing \
     --exclude="swaylock,waybar,fuzzel,mesa-*-freeworld" \
+    && bash /tmp/hardware-package-set.sh check /tmp/asahi-hardware.before \
+    && rm /tmp/hardware-package-set.sh /tmp/asahi-hardware.before \
     && dnf clean all
 
 # Keep shared themes under /usr so all users get the same read-only files.
 # Only generated artifacts leave the builder; source and sassc stay behind.
 RUN rm -rf /usr/share/themes/Graphite-purple-Dark-dracula \
            /usr/share/icons/dracula-icons-main
-COPY --from=theme-builder /usr/share/themes/Graphite-purple-Dark-dracula /usr/share/themes/Graphite-purple-Dark-dracula
-COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/dracula-icons-main
-COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
-COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
-
-# The brightness daemon comes from a disposable builder stage, so no compiler
-# or installer tooling enters this image.
-COPY --from=brightnessd-builder /usr/sbin/asahi-brightnessd /usr/sbin/asahi-brightnessd
-COPY --from=brightnessd-builder /usr/share/licenses/asahi-brightnessd /usr/share/licenses/asahi-brightnessd
+COPY --from=artifacts / /
+RUN fc-cache -f /usr/share/fonts/OTF/overpass-nerd
 
 COPY files/system/ /
 
@@ -155,11 +170,6 @@ RUN systemctl enable greetd.service && \
     systemctl set-default graphical.target
 
 RUN printf 'HOMEBREW_NO_ANALYTICS=%s\n' 1 >> /etc/environment
-
-COPY files/scripts/install-overpass-nerd.sh /tmp/install-overpass-nerd.sh
-RUN chmod +x /tmp/install-overpass-nerd.sh && \
-    /tmp/install-overpass-nerd.sh && \
-    rm /tmp/install-overpass-nerd.sh
 
 # These base-image overrides name GNOME parts that this image removes.
 RUN rm -f /usr/share/glib-2.0/schemas/00_org.gnome.shell.gschema.override \
