@@ -10,7 +10,7 @@ Wants=systemd-udevd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/asahi-brightnessd
+ExecStart=/usr/bin/asahi-brightnessd
 Restart=on-failure
 RestartSec=5s
 # Root must write the light in /sys. ProtectSystem=strict still allows API paths.

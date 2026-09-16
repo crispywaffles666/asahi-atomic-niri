@@ -709,7 +709,7 @@ logic, exporting `ASAHI_ATOMIC_DTBS` rather than plain `DTBS`), the
 signature key / `registries.d` / `policy.json` present with the expected GHCR
 namespace, and the update configuration never auto-rebooting (auto-apply timers
 masked). It also requires `iio-sensor-proxy` and `monitor-sensor`, the
-`asahi-brightnessd` binary at `/usr/sbin/asahi-brightnessd` (executable), its
+`asahi-brightnessd` binary at `/usr/bin/asahi-brightnessd` (executable), its
 unit present and enabled with an `ExecStart` binary that exists and the
 panel-backlight `ConditionPathExists` gate, plus a hardware-free smoke test that
 the daemon fails cleanly (non-zero exit, no hang) when no Asahi sysfs exists.

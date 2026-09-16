@@ -38,8 +38,9 @@ patch -p1 -d /tmp/asahi-brightnessd-src < /tmp/asahi-brightnessd-kbdonly.patch
 make -C /tmp/asahi-brightnessd-src
 make -C /tmp/asahi-brightnessd-src install
 
-if [[ ! -x /usr/sbin/asahi-brightnessd ]]; then
-    echo "ERROR: /usr/sbin/asahi-brightnessd missing after make install" >&2
+BRIGHTNESSD=/usr/bin/asahi-brightnessd
+if [[ ! -x "$BRIGHTNESSD" ]]; then
+    echo "ERROR: $BRIGHTNESSD missing after make install" >&2
     exit 1
 fi
 
@@ -47,8 +48,8 @@ fi
 install -Dm0644 /tmp/asahi-brightnessd-src/LICENSE \
     /usr/share/licenses/asahi-brightnessd/LICENSE
 
-command -v strip >/dev/null 2>&1 && strip /usr/sbin/asahi-brightnessd
+command -v strip >/dev/null 2>&1 && strip "$BRIGHTNESSD"
 
 rm -rf /tmp/asahi-brightnessd-src /tmp/asahi-brightnessd.tar.gz
 
-echo "Installed /usr/sbin/asahi-brightnessd"
+echo "Installed $BRIGHTNESSD"

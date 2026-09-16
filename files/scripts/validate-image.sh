@@ -423,7 +423,18 @@ if [[ ! -L "/etc/systemd/system/multi-user.target.wants/$BREW_UNIT" ]] && \
     fail "brew setup unit is not enabled (no target .wants symlink)"
 fi
 
-BRIGHTNESSD=/usr/sbin/asahi-brightnessd
+# Fedora's merged-sbin layout is required by rpm-ostree package layering:
+# glibc's translated file trigger invokes /sbin/ldconfig. Copying an artifact
+# below /usr/sbin can replace this symlink with a directory and make that path
+# disappear from otherwise valid images.
+if [[ ! -L /usr/sbin || "$(readlink -f /usr/sbin)" != /usr/bin ]]; then
+    fail "/usr/sbin must remain a symlink to /usr/bin"
+fi
+if [[ ! -x /sbin/ldconfig ]]; then
+    fail "/sbin/ldconfig is missing; rpm-ostree package layering would fail"
+fi
+
+BRIGHTNESSD=/usr/bin/asahi-brightnessd
 if [[ ! -x "$BRIGHTNESSD" ]]; then
     fail "asahi-brightnessd binary missing or not executable: $BRIGHTNESSD"
 fi

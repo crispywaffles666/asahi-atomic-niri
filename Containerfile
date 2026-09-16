@@ -50,7 +50,7 @@ COPY --from=theme-builder /usr/share/themes/Graphite-purple-Dark-dracula /usr/sh
 COPY --from=theme-builder /usr/share/icons/dracula-icons-main /usr/share/icons/dracula-icons-main
 COPY --from=theme-builder /usr/share/licenses/Graphite-gtk-theme /usr/share/licenses/Graphite-gtk-theme
 COPY --from=theme-builder /usr/share/licenses/dracula-icons /usr/share/licenses/dracula-icons
-COPY --from=brightnessd-builder /usr/sbin/asahi-brightnessd /usr/sbin/asahi-brightnessd
+COPY --from=brightnessd-builder /usr/bin/asahi-brightnessd /usr/bin/asahi-brightnessd
 COPY --from=brightnessd-builder /usr/share/licenses/asahi-brightnessd /usr/share/licenses/asahi-brightnessd
 COPY --from=font-builder /usr/share/fonts/OTF/overpass-nerd /usr/share/fonts/OTF/overpass-nerd
 
